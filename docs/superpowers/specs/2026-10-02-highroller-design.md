@@ -38,10 +38,15 @@ Only `fluidnc.js` knows the protocol. Everything in `lib/` is plain functions th
 
 ## Talking to FluidNC
 
+Details below were checked against FluidNC's source code, versions 3.9.9 and 4.1.1.
+
 **Websocket**
-- Address: `ws://<host>:81/`, with subprotocol `arduino`.
-- Incoming binary frames carry the console output. They're decoded with `TextDecoder` and buffered into whole lines.
-- Incoming text frames are control messages (`CURRENT_ID`, `PING`, …). Most are ignored.
+- Address depends on the firmware version, so the app tries the 4.x address first and then the 3.x one:
+  - FluidNC 4.x: `ws://<host>/`, on port 80.
+  - FluidNC 3.x: `ws://<host>:81/`, with subprotocol `arduino`.
+- Incoming binary frames carry the console output. They're decoded with `TextDecoder` and buffered into whole lines, which end in `\r\n`.
+- Incoming text frames are control messages (`currentID:`, `CURRENT_ID:`, `ACTIVE_ID:`, `PING`). The app ignores them.
+- Commands and real-time bytes are sent as websocket text frames. FluidNC treats anything it receives on the websocket exactly like serial input.
 
 **Commands**
 - One line is sent at a time. The next line goes out only after FluidNC replies `ok` or `error:N`.
@@ -58,11 +63,15 @@ Only `fluidnc.js` knows the protocol. Everything in `lib/` is plain functions th
 | `0x85` | Cancel jog |
 | Override bytes | Change feed, spindle or rapid % |
 
+Bytes of `0x80` and above are sent as one-character strings. The browser encodes them as UTF-8, and FluidNC decodes UTF-8 before acting on them.
+
 **Status reports**
-- The app turns on auto-reporting with `$Report/Interval=50`, which gives 20 reports a second. If the firmware doesn't support it, the app polls with `?` instead.
-- Fields parsed: `State`, `MPos`, `WCO`, `FS`, `Ov`, `Pn`, `A`, `SD`.
-- `WCO` (work offset) and `Ov` (overrides) only appear in some reports, so their last values are cached.
-- Work position is computed as WPos = MPos − WCO.
+- The app turns on auto-reporting with `$RI=100`, which gives 10 reports a second.
+- FluidNC only auto-reports while the machine moves or when something changes. So whenever nothing has arrived for 250 ms, the app sends `?`.
+- If nothing at all arrives for 3 s, the app treats the link as dead and reconnects. That also covers a phone waking from sleep.
+- Fields parsed: `State` (including `Hold:0`/`Hold:1`), `MPos` or `WPos` (depending on FluidNC's `$10` setting), `WCO`, `FS`, `Ov`, `Pn`, `A`, `SD`.
+- `WCO` (work offset) and `Ov` (overrides) only appear in some reports, so their last values are cached. `A` (spindle and coolant state) only appears alongside `Ov`.
+- Work position: WPos = MPos − WCO. If the report gives WPos instead, MPos = WPos + WCO.
 
 **Waiting and probing**
 - To wait until motion has finished, the app sends `G4 P0`. Its `ok` only arrives once all earlier moves are complete.
@@ -71,7 +80,13 @@ Only `fluidnc.js` knows the protocol. Everything in `lib/` is plain functions th
 **HTTP**
 - SD card: list, upload (with a progress bar), download, delete.
 - Flash: read and upload, used for the config file, `highroller.json` and app updates.
-- The exact endpoints will be copied from the stock WebUI's own requests (see "Verify on hardware").
+- Endpoints by version:
+  - FluidNC 4.x: WebDAV at `/sd/…` and `/flash/…`, using GET, PUT, DELETE and PROPFIND.
+  - FluidNC 3.x: the older `/upload` (SD card) and `/files` (flash) endpoints.
+
+  Which one to build depends on the board's firmware version (see "Verify on hardware").
+- FluidNC refuses to serve files from flash while the machine is moving. So the app reads the config file and `highroller.json` while idle and keeps them in memory.
+- The current job's G-code is cached in the browser (IndexedDB), so a page reload during a cut doesn't have to download the file again.
 
 **Active config file:** found with `$Config/Filename`. It is normally `config.yaml`.
 
@@ -92,7 +107,9 @@ Only `fluidnc.js` knows the protocol. Everything in `lib/` is plain functions th
 - Large position readout in work coordinates, with machine coordinates shown smaller.
 - XY pad and a Z rocker.
 - Step sizes 0.1 / 1 / 10 / 100 mm. A tap moves one step with `$J=G91 …`.
-- Hold-to-jog sends a short move (about 0.25 s of travel) roughly every 100 ms while held, then a jog cancel on release. If the connection drops, the machine stops within a fraction of a second instead of running to the end of travel.
+- Press and hold for continuous jogging; a press shorter than 300 ms counts as a tap.
+- While held, the app sends short jog moves of 0.1 s of travel each, keeping about 0.25 s of motion queued in FluidNC. On release it sends a jog cancel.
+- If the connection drops, the machine therefore stops within a fraction of a second instead of running to the end of travel.
 - Zeroing buttons:
   - Probe Z0 with the touch plate.
   - Zero X/Y here.
@@ -286,17 +303,18 @@ Settings are stored on the board in `highroller.json` (on the flash), so the pho
   It grows only as features need it.
 - **On the machine:** each wizard runs against the fake first, then on the real machine with a hand near the e-stop.
 
-## Verify on hardware (first implementation step)
+## Verify on hardware
 
-Watch the stock WebUI's network traffic in a browser and confirm the following. If something differs, follow what the stock WebUI does.
+Settled by reading FluidNC's source (versions 3.9.9 and 4.1.1):
+- **Websocket:** address by version, commands sent over the websocket, and how frames are split. See "Talking to FluidNC".
+- **Status fields:** `$RI` (report interval) exists in both versions. `Pn:` and `SD:` appear in status reports.
+- **Second page:** any file on flash is served by its name, and the compressed `.gz` copy is used automatically. So `/highroller.html` serves `highroller.html.gz`.
+- **Dust collector wiring:** an on/off spindle's `enable_pin` follows M3/M5.
 
-1. **Websocket address:** port 81, or `/ws` on port 80 for this firmware version.
-2. **Sending commands:** whether commands can go over the websocket. If not, use HTTP `/command?commandText=…&PAGEID=…`.
-3. **File endpoints:** the HTTP endpoints to list, upload, download and delete files on the SD card and the flash.
-4. **Status fields:** whether `$Report/Interval` is supported, and whether the `SD:` and `Pn:` fields appear in status reports.
-5. **Second page:** whether FluidNC serves a second compressed page such as `/highroller.html`.
-6. **Dust collector wiring:** whether the Relay spindle's `enable_pin` switches with M3 / M5.
-7. **Output pins:** which spare output pins the Jackpot has. Take them from V1 Engineering's pinout, then check the user's `config.yaml`.
+Still open:
+1. **The board's firmware version.** Run `$Build/Info` to find it. This decides which file endpoints the app uses.
+2. **Spare output pins on the Jackpot.** Take them from V1 Engineering's pinout, then check the user's `config.yaml`.
+3. **A smoke test on the real machine:** connect, read position, jog, STOP.
 
 ## Build order
 
