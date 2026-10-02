@@ -109,6 +109,8 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 - Step sizes 0.1 / 1 / 10 / 100 mm. A tap moves one step with `$J=G91 …`.
 - Press and hold for continuous jogging; a press shorter than 300 ms counts as a tap.
 - While held, the app sends short jog moves of 0.1 s of travel each, keeping about 0.25 s of motion queued in FluidNC. On release it sends a jog cancel.
+- FluidNC quietly caps jog speed at each axis's maximum rate. So the app reads `$/axes/<axis>/max_rate_mm_per_min` on connect and caps jog speeds at those values. It also never lets the distance it has sent get more than 0.6 s of travel ahead of the position FluidNC reports.
+- Every time the websocket connects, the app sends a jog cancel, so a jog left over from before a dropped link never continues.
 - If the connection drops, the machine therefore stops within a fraction of a second instead of running to the end of travel.
 - Zeroing buttons:
   - Probe Z0 with the touch plate.
@@ -132,7 +134,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 - **Pause and resume:** Pause sends `!`, Resume sends `~`.
 - **Stop:**
   1. Send `!` to hold.
-  2. Wait for the state to show `Hold:0`, meaning motion has stopped. Give up waiting after 1 s.
+  2. Wait 150 ms for a fresh status report, then wait for the state to show `Hold:0`, meaning motion has stopped. Give up waiting after 2 s (slowing from a full-speed rapid takes about 0.75 s on the stock LowRider).
   3. Send `0x18` to reset. Resetting after the hold keeps the machine's position, so no re-home is needed.
   4. Offer the Raise Z button.
 
