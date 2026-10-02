@@ -11,22 +11,25 @@ const MAX_RATE = { X: 9000, Y: 9000, Z: 900 } // mm/min, stock LowRider Jackpot 
 
 export function start(port = 8081) {
   const m = { state: 'Alarm', mpos: [0, 0, 0], wco: [0, 0, 0], ov: [100, 100, 100], moves: [], absolute: true, feed: 1000 }
-  let client = null
-  let ri = 0
+  // Like FluidNC 4.x, any number of clients: replies go to the asker, state changes and alarms to everyone.
+  const clients = new Set()
+  let ri = 0 // ponytail: one shared report interval; FluidNC keeps one per client
   let lastReport = 0
 
-  const out = text => client?.send(Buffer.from(text + '\r\n'), { binary: true })
-  const ok = () => out('ok')
+  const send = (ws, text) => ws.send(Buffer.from(text + '\r\n'), { binary: true })
+  const broadcast = text => { for (const ws of clients) send(ws, text) }
   const fmt = v => v.map(n => n.toFixed(3)).join(',')
-  const status = () => {
-    lastReport = Date.now()
+  const status = ws => {
     const feed = m.moves.length && !m.state.startsWith('Hold') ? m.moves[0].feed : 0
-    out(`<${m.state}|MPos:${fmt(m.mpos)}|FS:${feed},0|WCO:${fmt(m.wco)}|Ov:${m.ov.join(',')}>`)
+    const report = `<${m.state}|MPos:${fmt(m.mpos)}|FS:${feed},0|WCO:${fmt(m.wco)}|Ov:${m.ov.join(',')}>`
+    if (ws) return send(ws, report)
+    lastReport = Date.now()
+    broadcast(report)
   }
   const words = text => [...text.matchAll(/([A-Z])\s*(-?\d*\.?\d+)/g)].map(([, w, v]) => [w, Number(v)])
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 
-  function motion(text, jog) {
+  function motion(text, jog, ok) {
     let abs = jog ? true : m.absolute
     let feed = jog ? null : m.feed
     let rapid = false
@@ -56,11 +59,13 @@ export function start(port = 8081) {
     ok()
   }
 
-  function line(text) {
+  function line(text, ws) {
     const l = text.trim().toUpperCase()
     if (!l) return
-    if (l.startsWith('$RI=')) { ri = Number(l.slice(4)); status(); return ok() }
-    if (l === '$X') { m.state = 'Idle'; out('[MSG:INFO: Caution: Unlocked]'); return ok() }
+    const reply = t => send(ws, t)
+    const ok = () => reply('ok')
+    if (l.startsWith('$RI=')) { ri = Number(l.slice(4)); status(ws); return ok() }
+    if (l === '$X') { m.state = 'Idle'; status(); reply('[MSG:INFO: Caution: Unlocked]'); return ok() }
     if (l === '$H') {
       m.state = 'Home'
       status()
@@ -68,9 +73,9 @@ export function start(port = 8081) {
       return
     }
     const q = /^\$\/AXES\/([XYZ])\/MAX_RATE_MM_PER_MIN$/.exec(l)
-    if (q) { out(`$/axes/${q[1].toLowerCase()}/max_rate_mm_per_min=${MAX_RATE[q[1]].toFixed(3)}`); return ok() }
-    if (m.state === 'Alarm') return out('error:9') // G-code locked out during alarm
-    if (l.startsWith('$J=')) return motion(l.slice(3), true)
+    if (q) { reply(`$/axes/${q[1].toLowerCase()}/max_rate_mm_per_min=${MAX_RATE[q[1]].toFixed(3)}`); return ok() }
+    if (m.state === 'Alarm') return reply('error:9') // G-code locked out during alarm
+    if (l.startsWith('$J=')) return motion(l.slice(3), true, ok)
     if (/^G10\s*L20\s*P[01]/.test(l)) {
       for (const [w, v] of words(l.replace(/^G10\s*L20\s*P[01]/, ''))) {
         if (AXES.includes(w)) m.wco[AXES.indexOf(w)] = m.mpos[AXES.indexOf(w)] - v
@@ -78,13 +83,13 @@ export function start(port = 8081) {
       status()
       return ok()
     }
-    if (/^(G9[01]\s*)?G[01]\b/.test(l)) return motion(l, false)
+    if (/^(G9[01]\s*)?G[01]\b/.test(l)) return motion(l, false, ok)
     ok()
   }
 
-  function realtime(c) {
+  function realtime(c, ws) {
     const code = c.codePointAt(0)
-    if (c === '?') return status()
+    if (c === '?') return status(ws)
     if (c === '!') {
       if (m.state === 'Jog') { m.moves = []; m.state = 'Idle' } // a hold during a jog cancels it
       else if (m.state === 'Run') m.state = 'Hold:0'
@@ -95,8 +100,8 @@ export function start(port = 8081) {
       const wasMoving = m.state === 'Run' || m.state === 'Jog'
       m.moves = []
       if (m.state !== 'Alarm') m.state = wasMoving ? 'Alarm' : 'Idle'
-      out("Grbl 4.1 [FluidNC fake, '$' for help]")
-      if (wasMoving) out('ALARM:3')
+      broadcast("Grbl 4.1 [FluidNC fake, '$' for help]")
+      if (wasMoving) broadcast('ALARM:3')
       return status()
     }
     if (code === 0x85) { if (m.state === 'Jog') { m.moves = []; m.state = 'Idle' } return status() }
@@ -129,18 +134,17 @@ export function start(port = 8081) {
 
   const wss = new WebSocketServer({ port })
   wss.on('connection', ws => {
-    client?.close() // one client at a time is plenty for a fake
-    client = ws
+    clients.add(ws)
     ws.send('currentID:0') // text control frame, as FluidNC sends
     let buf = ''
     ws.on('message', data => {
       for (const c of data.toString()) { // UTF-8 decoded: override bytes arrive as single characters
-        if ('?!~\x18'.includes(c) || c.codePointAt(0) >= 0x80) realtime(c)
-        else if (c === '\n') { line(buf); buf = '' }
+        if ('?!~\x18'.includes(c) || c.codePointAt(0) >= 0x80) realtime(c, ws)
+        else if (c === '\n') { line(buf, ws); buf = '' }
         else if (c !== '\r') buf += c
       }
     })
-    ws.on('close', () => { if (client === ws) client = null })
+    ws.on('close', () => clients.delete(ws))
   })
 
   return {

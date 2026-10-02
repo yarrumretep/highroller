@@ -25,6 +25,24 @@ test('the app client can unlock, jog and see the new position', async () => {
   server.close()
 })
 
+test('two clients stay connected at once, like FluidNC 4.x', async () => {
+  const server = start(8097)
+  const conns = [[], []]
+  const clients = conns.map(c => new FluidNC({ host: 'localhost:8097', onConnection: s => c.push(s) }))
+  try {
+    for (const fnc of clients) fnc.connect()
+    await sleep(1500)
+    assert.deepEqual(conns, [['connecting', 'open'], ['connecting', 'open']])
+    assert.equal((await clients[0].send('$X')).ok, true)
+    assert.equal((await clients[1].send('$J=G91 G21 X5 F3000')).ok, true)
+    await sleep(400)
+    for (const fnc of clients) assert.ok(Math.abs(fnc.status.mpos[0] - 5) < 1e-6, `x=${fnc.status.mpos[0]}`)
+  } finally {
+    for (const fnc of clients) fnc.close() // a reconnecting client would keep the test process alive
+    server.close()
+  }
+})
+
 test('feed override bytes change the reported override', async () => {
   const server = start(8098)
   const fnc = new FluidNC({ host: 'localhost:8098' })
