@@ -12,6 +12,8 @@ test('the app client can unlock, jog and see the new position', async () => {
   fnc.connect()
   await opened
   assert.equal((await fnc.send('$X')).ok, true)
+  const r = await fnc.send('$/axes/z/max_rate_mm_per_min')
+  assert.deepEqual(r.lines, ['$/axes/z/max_rate_mm_per_min=900.000'])
   assert.equal((await fnc.send('$J=G91 G21 X5 F3000')).ok, true)
   await sleep(400)
   assert.equal(fnc.status.state, 'Idle')

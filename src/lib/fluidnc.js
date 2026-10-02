@@ -87,7 +87,7 @@ export class FluidNC {
   _watch() {
     const quiet = Date.now() - this.lastRx
     if (quiet > 3000) this._drop() // dead link, e.g. a phone that slept: start over
-    else if (quiet > 250) this.realtime(0x3f) // '?': FluidNC only auto-reports while moving
+    else if (quiet >= 200) this.realtime(0x3f) // '?': FluidNC only auto-reports while moving
   }
 
   _drop() {

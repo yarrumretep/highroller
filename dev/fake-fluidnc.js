@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url'
 const RAPID = 5000 // mm/min
 const TICK = 20 // ms
 const AXES = 'XYZ'
+const MAX_RATE = { X: 9000, Y: 9000, Z: 900 } // mm/min, stock LowRider Jackpot config
 
 export function start(port = 8081) {
   const m = { state: 'Alarm', mpos: [0, 0, 0], wco: [0, 0, 0], ov: [100, 100, 100], moves: [], absolute: true, feed: 1000 }
@@ -29,7 +30,8 @@ export function start(port = 8081) {
     let abs = jog ? true : m.absolute
     let feed = jog ? null : m.feed
     let rapid = false
-    const target = [...(m.moves.at(-1)?.to ?? m.mpos)]
+    const from = m.moves.at(-1)?.to ?? m.mpos
+    const target = [...from]
     for (const [w, v] of words(text)) {
       if (w === 'G' && v === 90) abs = true
       else if (w === 'G' && v === 91) abs = false
@@ -44,7 +46,12 @@ export function start(port = 8081) {
       m.absolute = abs
       if (feed) m.feed = feed
     }
-    m.moves.push({ to: target, feed: rapid ? RAPID : feed ?? m.feed, jog, rapid })
+    m.moves.push({
+      to: target,
+      feed: Math.min(rapid ? RAPID : feed ?? m.feed, Math.min(...[...AXES].filter((_, k) => target[k] !== from[k]).map(a => MAX_RATE[a]))),
+      jog,
+      rapid,
+    })
     if (m.state === 'Idle') m.state = jog ? 'Jog' : 'Run'
     ok()
   }
@@ -60,6 +67,8 @@ export function start(port = 8081) {
       setTimeout(() => { m.mpos = [0, 0, 0]; m.state = 'Idle'; status(); ok() }, 1500)
       return
     }
+    const q = /^\$\/AXES\/([XYZ])\/MAX_RATE_MM_PER_MIN$/.exec(l)
+    if (q) { out(`$/axes/${q[1].toLowerCase()}/max_rate_mm_per_min=${MAX_RATE[q[1]].toFixed(3)}`); return ok() }
     if (m.state === 'Alarm') return out('error:9') // G-code locked out during alarm
     if (l.startsWith('$J=')) return motion(l.slice(3), true)
     if (/^G10\s*L20\s*P[01]/.test(l)) {

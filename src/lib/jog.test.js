@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createJogger } from './jog.js'
 
 function fakeFnc() {
-  const f = { sent: [], rt: [], pending: [], drops: [] }
+  const f = { sent: [], rt: [], pending: [], drops: [], status: { mpos: [0, 0, 0] } }
   f.send = line => new Promise(resolve => { f.sent.push(line); f.pending.push(resolve) })
   f.realtime = code => f.rt.push(code)
   f.dropQueued = match => f.drops.push(match)
@@ -73,4 +73,28 @@ test('stop without a hold does nothing', () => {
   const f = fakeFnc()
   createJogger(f).stop()
   assert.deepEqual(f.rt, [])
+})
+
+test('a machine slower than commanded never gets more than 0.6 s of jog distance queued', t => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'] })
+  const f = fakeFnc() // mpos never changes: the machine is not keeping up at all
+  const j = createJogger(f)
+  j.start('Z', 1, 1500) // 2.5 mm per 0.1 s move; 0.6 s at 1500 mm/min = 15 mm
+  for (let i = 0; i < 40; i++) t.mock.timers.tick(50) // hold 2 s
+  assert.equal(f.sent.length, 6)
+  f.status.mpos = [0, 0, 5] // it has now travelled 5 mm
+  t.mock.timers.tick(50)
+  assert.equal(f.sent.length, 8)
+  j.stop()
+})
+
+test('a late timer tick does not send a burst of catch-up moves', t => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'] })
+  const f = fakeFnc()
+  const j = createJogger(f)
+  j.start('X', 1, 3000) // 3 moves queued
+  f.status.mpos = [1000, 0, 0] // far travelled, so only the clock limits sending
+  t.mock.timers.tick(2000) // every interval callback sees the clock at 2 s
+  assert.equal(f.sent.length, 6) // one 0.3 s top-up, not 2 s worth
+  j.stop()
 })

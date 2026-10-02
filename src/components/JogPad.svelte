@@ -15,13 +15,19 @@
 
   const ready = $derived(machine.conn === 'open' && (machine.status.state === 'Idle' || machine.status.state === 'Jog'))
 
+  // FluidNC silently caps jog speed at each axis's max rate; asking for more builds a planner backlog.
+  const maxXY = $derived(Math.min(6000, machine.maxRate.X, machine.maxRate.Y))
+  const maxZ = $derived(Math.min(1500, machine.maxRate.Z))
+  const feedXY = $derived(Math.min(settings.feedXY, maxXY))
+  const feedZ = $derived(Math.min(settings.feedZ, maxZ))
+
   // One press at a time: tap = one step, hold = run until release.
   let press = null
   let pad
 
   function down(axis, dir) {
     if (!ready || press) return
-    const feed = axis === 'Z' ? settings.feedZ : settings.feedXY
+    const feed = axis === 'Z' ? feedZ : feedXY
     const p = { held: false, tap: () => jogger.step(axis, dir * settings.step, feed) }
     p.timer = setTimeout(() => { p.held = true; jogger.start(axis, dir, feed) }, HOLD_MS)
     press = p
@@ -47,6 +53,8 @@
 
   // Alarm or disconnect mid-hold: stop. (Jog buttons are never `disabled`, which would swallow pointerup.)
   $effect(() => { if (!ready) cancel() })
+  // STOP also cancels a press still waiting to become a hold.
+  $effect(() => { machine.stops; cancel() })
 
   const pointer = (axis, dir) => ({
     onpointerdown: e => { e.currentTarget.setPointerCapture(e.pointerId); down(axis, dir) },
@@ -58,6 +66,7 @@
 
   function keydown(e) {
     if (pad.offsetParent === null || e.target.closest?.('input, textarea')) return // pad hidden, or typing
+    if (e.ctrlKey || e.metaKey || e.altKey) return // leave browser shortcuts alone
     if (e.key === '[' || e.key === ']') {
       const i = STEPS.indexOf(settings.step) + (e.key === ']' ? 1 : -1)
       settings.step = STEPS[Math.max(0, Math.min(STEPS.length - 1, i))]
@@ -101,8 +110,8 @@
     <button class="arrow z" {...pointer('Z', -1)}>Z−</button>
   </div>
 
-  <label>XY speed <input type="range" min="100" max="6000" step="100" bind:value={settings.feedXY} /><span class="mono">{settings.feedXY}</span></label>
-  <label>Z speed <input type="range" min="50" max="1500" step="50" bind:value={settings.feedZ} /><span class="mono">{settings.feedZ}</span></label>
+  <label>XY speed <input type="range" min="100" max={maxXY} step="100" bind:value={settings.feedXY} /><span class="mono">{feedXY}</span></label>
+  <label>Z speed <input type="range" min="50" max={maxZ} step="50" bind:value={settings.feedZ} /><span class="mono">{feedZ}</span></label>
 </div>
 
 <style>

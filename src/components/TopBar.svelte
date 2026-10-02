@@ -16,7 +16,7 @@
     {machine.conn === 'open' ? 'Connected' : machine.everOpen ? 'Reconnecting…' : 'Connecting…'}
   </span>
   <span class="state {tone}">{machine.conn === 'open' ? state : '–'}</span>
-  <button class="stop" onclick={stop}>STOP</button>
+  <button class="stop" onpointerdown={e => { e.preventDefault(); stop() }} onclick={e => e.detail === 0 && stop()} oncontextmenu={e => e.preventDefault()}>STOP</button>
 </header>
 
 {#if machine.conn !== 'open' && machine.everOpen}
@@ -63,6 +63,7 @@
     color: white;
     background: var(--bad);
     border-color: var(--bad);
+    touch-action: none;
   }
   .stop:active { background: #991b1b; }
   .banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; color: white; }
