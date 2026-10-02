@@ -17,6 +17,7 @@
 
   // One press at a time: tap = one step, hold = run until release.
   let press = null
+  let pad
 
   function down(axis, dir) {
     if (!ready || press) return
@@ -51,11 +52,12 @@
     onpointerdown: e => { e.currentTarget.setPointerCapture(e.pointerId); down(axis, dir) },
     onpointerup: up,
     onpointercancel: cancel,
+    onlostpointercapture: cancel,
     oncontextmenu: e => e.preventDefault(),
   })
 
   function keydown(e) {
-    if (e.target.closest?.('input, textarea')) return
+    if (pad.offsetParent === null || e.target.closest?.('input, textarea')) return // pad hidden, or typing
     if (e.key === '[' || e.key === ']') {
       const i = STEPS.indexOf(settings.step) + (e.key === ']' ? 1 : -1)
       settings.step = STEPS[Math.max(0, Math.min(STEPS.length - 1, i))]
@@ -75,7 +77,7 @@
 <svelte:window onkeydown={keydown} onkeyup={keyup} onblur={cancel} />
 <svelte:document onvisibilitychange={cancel} />
 
-<div class="panel pad">
+<div class="panel pad" bind:this={pad}>
   <div class="steps">
     {#each STEPS as s}
       <button class:on={settings.step === s} onclick={() => (settings.step = s)}>{s}</button>
