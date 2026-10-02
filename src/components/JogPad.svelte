@@ -4,6 +4,7 @@
 
   const STEPS = [0.1, 1, 10, 100]
   const HOLD_MS = 300 // shorter presses are taps (one step)
+  const Z_STEP_MAX = 10 // mm: soft limits are off, so one mis-tap must not plunge 100 mm
   const KEYS = {
     ArrowLeft: ['X', -1],
     ArrowRight: ['X', 1],
@@ -28,7 +29,8 @@
   function down(axis, dir) {
     if (!ready || press) return
     const feed = axis === 'Z' ? feedZ : feedXY
-    const p = { held: false, tap: () => jogger.step(axis, dir * settings.step, feed) }
+    const step = axis === 'Z' ? Math.min(settings.step, Z_STEP_MAX) : settings.step
+    const p = { held: false, tap: () => jogger.step(axis, dir * step, feed) }
     p.timer = setTimeout(() => { p.held = true; jogger.start(axis, dir, feed) }, HOLD_MS)
     press = p
   }
@@ -100,7 +102,7 @@
     <button class="arrow z" {...pointer('Z', 1)}>Z+</button>
 
     <button class="arrow" {...pointer('X', -1)}>X−</button>
-    <span class="hint">{settings.step} mm<br />hold to run</span>
+    <span class="hint">{settings.step} mm{#if settings.step > Z_STEP_MAX}<br />(Z {Z_STEP_MAX}){/if}<br />hold to run</span>
     <button class="arrow" {...pointer('X', 1)}>X+</button>
     <span></span>
 
