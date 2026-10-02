@@ -1,6 +1,7 @@
 <script>
   import TopBar from './components/TopBar.svelte'
   import Dro from './components/Dro.svelte'
+  import JogPad from './components/JogPad.svelte'
   import Console from './components/Console.svelte'
 
   let tab = $state('jog')
@@ -11,6 +12,7 @@
 <main>
   <section class:off={tab !== 'jog'}>
     <Dro />
+    <JogPad />
   </section>
   <section class:off={tab !== 'more'}>
     <Console />
