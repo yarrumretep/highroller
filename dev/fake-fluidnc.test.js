@@ -1,0 +1,39 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { start } from './fake-fluidnc.js'
+import { FluidNC } from '../src/lib/fluidnc.js'
+
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+test('the app client can unlock, jog and see the new position', async () => {
+  const server = start(8099)
+  const fnc = new FluidNC({ host: 'localhost:8099' })
+  const opened = new Promise(r => { fnc.onConnection = c => c === 'open' && r() })
+  fnc.connect()
+  await opened
+  assert.equal((await fnc.send('$X')).ok, true)
+  assert.equal((await fnc.send('$J=G91 G21 X5 F3000')).ok, true)
+  await sleep(400)
+  assert.equal(fnc.status.state, 'Idle')
+  assert.ok(Math.abs(fnc.status.mpos[0] - 5) < 1e-6, `x=${fnc.status.mpos[0]}`)
+  assert.equal((await fnc.send('G10 L20 P0 X0')).ok, true)
+  await sleep(300)
+  assert.ok(Math.abs(fnc.status.wpos[0]) < 1e-6)
+  fnc.close()
+  server.close()
+})
+
+test('feed override bytes change the reported override', async () => {
+  const server = start(8098)
+  const fnc = new FluidNC({ host: 'localhost:8098' })
+  const opened = new Promise(r => { fnc.onConnection = c => c === 'open' && r() })
+  fnc.connect()
+  await opened
+  fnc.realtime(0x91) // +10 %
+  fnc.realtime(0x93) // +1 %
+  fnc.realtime(0x3f)
+  await sleep(200)
+  assert.deepEqual(fnc.status.ov, [111, 100, 100])
+  fnc.close()
+  server.close()
+})
