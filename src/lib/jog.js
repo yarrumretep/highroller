@@ -33,6 +33,7 @@ export function createJogger(fnc, now = () => Date.now()) {
     if (!hold) return
     clearInterval(hold.timer)
     hold = null
+    // Release cancels every pending jog, taps included: FluidNC's jog cancel flushes them all anyway.
     fnc.dropQueued(line => line.startsWith('$J='))
     fnc.realtime(JOG_CANCEL)
   }
