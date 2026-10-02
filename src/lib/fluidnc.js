@@ -22,6 +22,7 @@ export class FluidNC {
   }
 
   connect() {
+    if (this.ws) return
     this.wanted = true
     this._open()
   }

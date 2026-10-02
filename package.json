@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host",
     "build": "vite build && gzip -9kf dist/index.html",
-    "test": "node --test",
+    "test": "node --disable-warning=ExperimentalWarning --test",
     "fake": "node dev/fake-fluidnc.js"
   },
   "devDependencies": {

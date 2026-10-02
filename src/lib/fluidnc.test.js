@@ -47,6 +47,13 @@ test('connects to port 80 first and turns on auto-reporting', t => {
   assert.deepEqual(ws().sent, ['$RI=100\n'])
 })
 
+test('connect() while already connected does not open a second socket', t => {
+  const { fnc, ws } = setup(t)
+  ws().open()
+  fnc.connect()
+  assert.equal(FakeWS.all.length, 1)
+})
+
 test('falls back to the FluidNC 3.x port 81 when port 80 never opens', t => {
   const { ws } = setup(t)
   ws().drop()
