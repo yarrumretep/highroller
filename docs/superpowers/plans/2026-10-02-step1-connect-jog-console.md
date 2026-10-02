@@ -1672,3 +1672,29 @@ Expected:
 3. Open `http://192.168.40.174/highroller.html` on a phone.
 
 Expected: same behaviour as Step 2. The stock WebUI at `/` is untouched.
+
+---
+
+## Carry-forward from step 1's reviews
+
+These items came out of the reviews and need handling in later build steps.
+
+**Step 2, start here:**
+- **Make STOP testable.** Move the STOP sequence out of `machine.svelte.js` into a plain `src/lib` function, and test it with fake timers: hold first, wait through `Run`, `Jog` and `Hold:1`, reset on `Hold:0` or `Idle`, give up after 2 s. Give the fake a `Hold:1` phase of about 200 ms.
+- **Decide what STOP means during a job.** It now fires the moment it is pressed, so an accidental brush also aborts a running job. Consider making the press a feed hold (resumable), and keep the reset for a second press or a confirm.
+- **Keep the protocol in one place.** Add `fnc.hold()`, `fnc.resume()` and `fnc.jogCancel()`, so real-time byte values live only in `fluidnc.js`.
+- **Treat override values as read-only.** Override maths must not mutate `status.ov`, because snapshots share that array. Also mark `EMPTY`'s `wco` and `ov` as unknown until the first report arrives.
+- **Track pointers per press.** Store the `pointerId` in the jog press, and ignore buttons other than the main one.
+- **Keep app commands out of the console.** Don't echo the app's own query replies (`$/axes/…`) there.
+
+**Steps 3–4 (probing and calibration chain commands):**
+- **Per-command options.** Add `send(line, { quiet, timeoutMs })` with a per-command reply timeout.
+- **Ignore stale replies after a reset.** Ignore `ok` and `error` replies until FluidNC's `Grbl …` startup line arrives.
+- **Reconnecting after `$Bye`.** Remember which websocket address last worked and add a connect timeout, so a reboot isn't retried on the wrong port.
+
+**Task 7 additions (on the real machine):**
+- **Firmware version:** run `$Build/Info`, and check that the first status report includes WCO and Ov.
+- **Wi-Fi drop:** turn Wi-Fi off during a hold at the Z slider's maximum, moving Z+ (away from the work). The machine should stop within about a second.
+- **STOP on the phone:** try press-and-slide and long-press.
+- **STOP at full speed:** STOP during a full-speed G0 should end at Idle with no alarm.
+- **Output pins:** note which spare outputs the Jackpot has (needed for build step 5).
