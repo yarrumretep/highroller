@@ -40,7 +40,12 @@
   const canCancel = $derived(view.kind !== 'busy')
   const closeLabel = $derived(view.kind === 'done' || view.kind === 'error' || (view.kind === 'review' && !view.changes.length) ? 'Close' : 'Cancel')
 
-  $effect(() => { view; armed; pinClosed; primaryBtn?.focus() })
+  $effect(() => { view; primaryBtn?.focus() })
+  // A pin change during an arm step is the one case where the Probe button's own enabled state
+  // changes without `view` changing — refocus then, and only then: a pin change elsewhere (the clip
+  // can still be on the bit while the measurement form is up) must not steal focus from a field being
+  // typed into, and must not turn a checkbox's Space into pressing Apply in the review.
+  $effect(() => { if (view.kind === 'step' && view.arm && armed && !pinClosed) primaryBtn?.focus() })
 
   const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -69,14 +74,16 @@
     async apply(text) {
       throwIfStopped()
       const { name, text: old } = machine.config
-      // Once `written`, the new config is on flash even if the routine stops here; once `restarted`,
-      // $Bye has gone out and the board is on its way down — a STOP here can no longer undo either,
-      // so the "Stopped" message says exactly how far it got instead of just "Stopped".
-      let written = false, restarted = false
+      // Once `written`, the new config is on flash even if the routine stops here. `restarting` is
+      // set just before $Bye goes out — while it's in flight we can't tell whether the board already
+      // has it, so that case gets its own, admittedly-uncertain message. `restarted` means the result
+      // came back and was accepted: the board is on its way down for real.
+      let written = false, restarting = false, restarted = false
       const checkStopped = () => {
         if (!stopped) return
         if (!written) throw stopped
-        if (!restarted) throw new Error(`Stopped. The new config is on the board's flash as ${name} but not loaded; ${name}.bak holds the old one.`)
+        if (!restarting) throw new Error(`Stopped. The new config is on the board's flash as ${name} but not loaded; ${name}.bak holds the old one.`)
+        if (!restarted) throw new Error(`Stopped while the restart was being sent; the new ${name} is on flash and loads at the next restart; ${name}.bak holds the old one.`)
         throw new Error(`Stopped. The board is restarting with the new ${name} and has not been homed; ${name}.bak holds the old one.`)
       }
       // ponytail: the .bak is read back over the websocket ($LocalFS/Show), which drops blank lines; it is
@@ -88,6 +95,7 @@
       machine.config = null // the file on flash no longer matches what's loaded; stays unknown until the restart reloads it
       checkStopped()
       if (machine.conn !== 'open') throw new Error(`Lost the connection before the restart. The new config is on the board's flash as ${name}; ${name}.bak holds the old one.`)
+      restarting = true // about to send; a STOP landing during the await below can't know if the board got it
       const r = await sendLine('$Bye')
       checkStopped()
       if (!(r.ok || r.error === 'disconnected')) throw new Error(`$Bye failed: ${r.error}`)
@@ -174,7 +182,7 @@
     // Closed on its own: a second Escape while busy can bypass our preventDefault (Chromium's close
     // watcher only honours one prevented cancel without new user activation). While busy, the routine
     // is still running — reopen so STOP stays the only way out; otherwise treat it like a Cancel.
-    if (view.kind === 'busy') dialog.showModal()
+    if (view.kind === 'busy') dialog.isConnected && dialog.showModal()
     else cancel()
   }}
 >
