@@ -79,7 +79,8 @@ test('one pass: probes, dots, measurements, and a single config write with every
   assert.deepEqual(moves, ['G53 G0 X53 Y53', 'G53 G0 X1173 Y53', 'G53 G0 X1173 Y2393', 'G53 G0 X53 Y2393'])
   assert.equal(rec.sent[0], '$H')
   const a = rec.sent.indexOf('G53 G0 X53 Y53')
-  assert.deepEqual(rec.sent.slice(a + 1, a + 9), ['G4 P0', 'M5', 'G91', 'G0 Z2', 'G90', 'G53 G1 Z-50.1 F100', 'G53 G0 Z-30', 'G4 P0'])
+  // after the probe: lift clear of the plate, then (after Continue) the dot and the retract
+  assert.deepEqual(rec.sent.slice(a + 1, a + 9), ['G4 P0', 'G91', 'G0 Z5', 'G90', 'M5', 'G53 G1 Z-50.1 F100', 'G53 G0 Z-30', 'G4 P0'])
   assert.ok(rec.sent.includes('G53 G1 Z-49.6 F100')) // corner B's dot, 0.5 mm higher
 
   // The numbers
@@ -98,10 +99,10 @@ test('one pass: probes, dots, measurements, and a single config write with every
 
   // F4: "make the dot" previews exactly what Continue goes on to send, through the rapid to the next corner
   const dotStepA = rec.steps.find(st => st.title === 'Corner A: make the dot')
-  assert.deepEqual(dotStepA.lines, rec.sent.slice(a + 2, a + 11))
+  assert.deepEqual(dotStepA.lines, rec.sent.slice(a + 5, a + 11)) // M5, plunge, retract, G4, next corner's Z and XY
   // ... and after D, just the one final rapid up (no corner to move to)
   const dotStepD = rec.steps.find(st => st.title === 'Corner D: make the dot')
-  assert.equal(dotStepD.lines.length, 8)
+  assert.equal(dotStepD.lines.length, 5)
   assert.equal(dotStepD.lines.at(-1), 'G53 G0 Z3')
 
   // The review previews Apply's own moves ($Bye restarts the board; $H is a move too)

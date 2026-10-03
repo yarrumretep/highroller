@@ -96,6 +96,11 @@ export async function calibrate(io) {
         await g('G90')
       }
     }
+    // The probe ends with the bit resting on the plate: lift clear of it before asking for the plate back.
+    io.busy(`Lifting ${LIFT_MM} mm off the plate…`)
+    await g('G91')
+    await g(`G0 Z${LIFT_MM}`)
+    await g('G90')
     const z = c.probed.z
     const plungeLine = `G53 G1 Z${num(z - s.plateMm - s.tapeMm)} F${DOT_FEED}`
     if (c.name === 'A') travelZ = Math.min(z + TRAVEL_ABOVE_MM, Z.max)
@@ -107,12 +112,9 @@ export async function calibrate(io) {
       title: `Corner ${c.name}: make the dot`,
       text: 'Lift the plate off the tape. Keep the clip on. Press Continue to push the bit into the tape.',
       plateOff: true, // the plate must not still be touching the bit
-      lines: ['M5', 'G91', 'G0 Z2', 'G90', plungeLine, upLine, 'G4 P0', ...nextLines],
+      lines: ['M5', plungeLine, upLine, 'G4 P0', ...nextLines],
     })
     await g('M5')
-    await g('G91')
-    await g('G0 Z2')
-    await g('G90')
     await g(plungeLine)
     await g(upLine)
     await g('G4 P0')
