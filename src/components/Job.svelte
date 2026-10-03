@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { machine } from '../lib/machine.svelte.js'
-  import { job, run, pause, resume, noJob } from '../lib/job.svelte.js'
+  import { job, run, pause, resume, noJob, unload } from '../lib/job.svelte.js'
   import { progress } from '../lib/track.js'
   import { confirm as ask } from '../lib/confirm.svelte.js'
   import FileBrowser from './FileBrowser.svelte'
@@ -42,6 +42,7 @@
     <div>
       <strong>{job.name || 'No file open'}</strong>
       {#if job.data}<span class="muted"> · about {clock(total)}</span>{/if}
+      {#if job.name && !running}<button class="close" aria-label="Close {job.name}" title="Close the file" onclick={unload}>✕</button>{/if}
     </div>
     <button disabled={machine.conn !== 'open' || !noJob()} onclick={() => (browsing = true)}>Open…</button>
   </div>
@@ -73,6 +74,7 @@
 <style>
   .job { display: grid; gap: 10px; }
   .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .close { min-width: 44px; min-height: 44px; margin-left: 4px; padding: 0; font-size: 14px; color: var(--muted); background: none; border: none; vertical-align: middle; } /* small to look at, still a finger-sized target */
   .muted { margin: 0; font-size: 14px; color: var(--muted); }
   .err { margin: 0; color: var(--bad); }
   progress { width: 100%; height: 14px; }

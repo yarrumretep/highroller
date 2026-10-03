@@ -114,6 +114,16 @@ export async function mkdir(dir, name) {
 
 export const sdUrl = path => sd.url(path)
 
+// Close the open file: the panel goes back to "No file open". Not while its job runs (the follower needs the data).
+export function unload() {
+  if (job.running) return
+  job.name = ''
+  job.data = null
+  job.current = -1
+  job.along = 0
+  job.error = ''
+}
+
 // One job at a time: FluidNC would queue a second $SD/Run and start it straight after the first.
 export async function run() {
   if (job.starting || !idleNoJob()) return
