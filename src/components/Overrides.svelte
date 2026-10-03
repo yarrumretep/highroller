@@ -34,6 +34,6 @@
   .ov { display: grid; gap: 10px; }
   label, .rapid { display: grid; grid-template-columns: 64px 1fr 72px; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
   .rapid { grid-template-columns: 64px repeat(3, 1fr); }
-  input[type='range'] { height: 36px; }
+  input[type='range'] { height: 44px; }
   .on { color: white; background: var(--accent); border-color: var(--accent); }
 </style>
