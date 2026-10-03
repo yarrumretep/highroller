@@ -58,6 +58,7 @@
 | `src/components/Preview.svelte` (modify) | Machine coordinates, travel outline, fit toggle; tap to go there |
 | `src/lib/track.js`, `src/lib/job.svelte.js`, `src/components/Job.svelte` (modify) | Progress by time; a time-left estimate that learns |
 | `src/lib/confirm.svelte.js`, `src/components/ConfirmDialog.svelte` (new) | In-app confirmation instead of window.confirm |
+| `src/components/FileBrowser.svelte` (new), `src/lib/files.js`, `dev/fake-fluidnc.js` (modify) | SD card browser with folders |
 | `dev/fake-fluidnc.js` (modify) | Touch plate and probing, flash files, `$Bye`, `$HZ`, `G4` |
 
 ---
@@ -2246,7 +2247,263 @@ git commit -m "Replace browser confirm() with an in-app dialog"
 
 ---
 
-### Task 14: On the machine (done by the user, hands near the e-stop)
+### Task 14: SD card browser with folders
+
+**Files:**
+- Modify: `src/lib/files.js`, `src/lib/files.test.js`, `src/lib/job.svelte.js`, `src/components/Job.svelte`, `dev/fake-fluidnc.js`, `dev/fake-fluidnc.test.js`
+- Create: `src/components/FileBrowser.svelte`
+
+**Interfaces:**
+- Paths are relative to the card's root with no leading slash: `''` is the root, `'jobs'` a folder, `'jobs/part.nc'` a file. `job.name` holds the open file's path; FluidNC's `SD:/sd/jobs/part.nc` maps to it through `baseName`.
+- `sdFiles(base)` becomes: `list(dir = '')`, `remove(dir, name, isDir = false)` (FluidNC's `action=delete` / `action=deletedir`), `download(path)`, `upload(file, dir = '', onProgress)`. FluidNC lists a folder with `/upload?path=/jobs/`, deletes `filename` inside `path`, takes the upload's full path from the part's file name (`/jobs/part.nc`), and serves `/sd/jobs/part.nc`. The folder must already exist on the card (no folder creation in the app yet: `ponytail`).
+- `job`: `dir` (the browser's current folder), `files` (that folder's entries). `refresh(dir)`, `upload(file, dir)`, `remove(dir, name, isDir)`, `load(path, size?, text?)` keep their guards from the fix wave (`idleNoJob`, `badName`, overwrite confirmation).
+- `<FileBrowser onclose />`: a `<dialog>` showing the current folder (path line, Up, folders first, then files with sizes), a selected entry, **Open** (loads the selected file and closes), **Upload here** (with progress), **Delete** (asks first), **Close**. Opened from the Job panel's **Open…** button; the panel itself shows only the open file.
+- The fake's SD card gains folders: `GET /upload?path=/&action=createdir&filename=jobs` creates one; listings are per folder; `deletedir` removes a folder and its contents; uploads into a folder that does not exist fail with `"Upload failed"`.
+
+- [ ] **Step 1: Write the failing tests**
+
+`src/lib/files.test.js`: replace the third test ("lists, downloads and deletes files on the fake controller") with:
+```js
+test('folders: list, upload into, download from and delete in a folder on the fake controller', async () => {
+  const server = start(8095)
+  try {
+    const sd = sdFiles('http://localhost:8095')
+    await fetch('http://localhost:8095/upload?path=%2F&action=createdir&filename=jobs')
+    assert.deepEqual(await sd.list(), [{ name: 'jobs', size: -1, dir: true }])
+    const form = new FormData() // the same request upload() sends from the browser, into the folder
+    form.append('/jobs/a.ncS', '5')
+    form.append('myfile', new Blob(['G0 X1']), '/jobs/a.nc')
+    assert.equal((await fetch('http://localhost:8095/upload', { method: 'POST', body: form })).status, 200)
+    assert.deepEqual(await sd.list('jobs'), [{ name: 'a.nc', size: 5, dir: false }])
+    assert.equal(await sd.download('jobs/a.nc'), 'G0 X1')
+    assert.deepEqual(await sd.remove('jobs', 'a.nc'), [])
+    assert.deepEqual(await sd.remove('', 'jobs', true), [])
+  } finally {
+    server.close()
+  }
+})
+```
+
+`dev/fake-fluidnc.test.js`: add
+```js
+test('the SD card has folders: per-folder listings, deletedir, and uploads need the folder', async () => {
+  const server = start(8089)
+  try {
+    const list = async dir => (await (await fetch(`http://localhost:8089/upload?path=${encodeURIComponent('/' + (dir ? dir + '/' : ''))}`)).json()).files.map(f => `${f.name}:${f.size}`)
+    await fetch('http://localhost:8089/upload?path=%2F&action=createdir&filename=jobs')
+    const up = async (path, text) => { const f = new FormData(); f.append(path + 'S', String(text.length)); f.append('myfile', new Blob([text]), path); return (await (await fetch('http://localhost:8089/upload', { method: 'POST', body: f })).json()).status }
+    assert.equal(await up('/jobs/a.nc', 'G0 X1'), 'Ok')
+    assert.equal(await up('/nope/b.nc', 'G0 X1'), 'Upload failed')
+    assert.deepEqual(await list(''), ['jobs:-1'])
+    assert.deepEqual(await list('jobs'), ['a.nc:5'])
+    await fetch('http://localhost:8089/upload?path=%2F&action=deletedir&filename=jobs')
+    assert.deepEqual(await list(''), [])
+  } finally {
+    server.close()
+  }
+})
+```
+
+- [ ] **Step 2: Run the tests and confirm they fail**
+
+Run: `npm test` — the two new tests FAIL (the fake has no folders; `list(dir)` ignores its argument).
+
+- [ ] **Step 3: Teach the fake about folders (`dev/fake-fluidnc.js`)**
+
+- Next to `const sd = new Map()` add `const dirs = new Set() // folders on the fake SD card, as paths without slashes at either end`.
+- Helpers:
+```js
+  const norm = p => (p ?? '/').replace(/^\/+|\/+$/g, '') // '/jobs/' → 'jobs', '/' → ''
+  const parent = p => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '')
+  const entriesOf = dir => [
+    ...[...dirs].filter(d => parent(d) === dir).map(d => ({ name: d.slice(dir ? dir.length + 1 : 0), shortname: d, size: -1, datetime: '' })),
+    ...[...sd].filter(([p]) => parent(p) === dir).map(([p, buf]) => ({ name: p.slice(dir ? dir.length + 1 : 0), shortname: p, size: buf.length, datetime: '' })),
+  ]
+```
+- Replace `listingOf(sd)` uses for `/upload` with a listing built from `entriesOf(norm(url.searchParams.get('path')))` and the same footer fields; keep `listingOf(flash)` for `/files`.
+- `/upload` GET actions, with `dir = norm(path)` and `name = url.searchParams.get('filename')`: `createdir` → `dirs.add(dir ? `${dir}/${name}` : name)`; `delete` → `sd.delete(dir ? `${dir}/${name}` : name)`; `deletedir` → remove that folder, every folder under it and every file under it. Status strings as FluidNC: `"<name> created"`, `"<name> deleted"`, else `"Ok"`.
+- `/upload` POST: for each file part, `const p = v.name.replace(/^\//, '')`; if `parent(p)` is not `''` and not in `dirs`, respond with the listing whose `status` is `"Upload failed"` and store nothing; else store under `p`.
+- `/sd/<path>` already decodes the whole remainder: keep.
+
+- [ ] **Step 4: `src/lib/files.js`**
+
+Replace `sdFiles` with:
+```js
+export function sdFiles(base = '') {
+  async function get(url) {
+    const r = await fetch(base + url)
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    return r
+  }
+  const q = encodeURIComponent
+  const dirParam = dir => q('/' + (dir ? dir + '/' : '')) // FluidNC wants /jobs/ for a folder
+  const dirPath = (dir, name) => '/' + (dir ? dir + '/' : '') + name
+  return {
+    list: async (dir = '') => parseList(await (await get(`/upload?path=${dirParam(dir)}`)).json()),
+    remove: async (dir, name, isDir = false) =>
+      parseList(await (await get(`/upload?path=${dirParam(dir)}&action=${isDir ? 'deletedir' : 'delete'}&filename=${q(name)}`)).json()),
+    download: async path => (await get(`/sd/${path.split('/').map(q).join('/')}`)).text(),
+    // XHR rather than fetch, because only XHR reports upload progress
+    upload: (file, dir = '', onProgress = () => {}) =>
+      new Promise((resolve, reject) => {
+        const path = dirPath(dir, file.name)
+        const form = new FormData()
+        form.append(path + 'S', String(file.size)) // before the file: FluidNC reads it when the upload starts
+        form.append('myfile', file, path)
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', base + '/upload')
+        xhr.upload.onprogress = e => e.lengthComputable && onProgress(e.loaded / e.total)
+        xhr.onload = () => {
+          if (xhr.status !== 200) return reject(new Error(`Upload failed: HTTP ${xhr.status}`))
+          try {
+            resolve(parseList(JSON.parse(xhr.responseText)))
+          } catch (e) {
+            reject(e)
+          }
+        }
+        xhr.onerror = () => reject(new Error('Upload failed: network error'))
+        xhr.send(form)
+      }),
+  }
+}
+```
+and change the header comment's `ponytail:` line to `// ponytail: folders are browsed and used, not created here; make them when copying files onto the card.`
+
+- [ ] **Step 5: `src/lib/job.svelte.js`**
+
+- Add `dir: ''` to the `job` state.
+- `refresh(dir = job.dir)`: `job.files = await sd.list(dir); job.dir = dir` (error handling as before).
+- `upload(file, dir = job.dir)`: keep the fix wave's guards; call `sd.upload(file, dir, p => …)`, then `load(dirPath, file.size, await file.text())` where the path is `dir ? `${dir}/${file.name}` : file.name`; the overwrite check looks at `job.files` (the current folder).
+- `remove(dir, name, isDir = false)`: `job.files = await sd.remove(dir, name, isDir)`.
+- `load(path, size, text)`: unchanged apart from the parameter name; the cache key is the path.
+- `run()`: unchanged (`$SD/Run=/${job.name}` is now a full path).
+
+- [ ] **Step 6: `src/components/FileBrowser.svelte`**
+
+```svelte
+<script>
+  import { onMount } from 'svelte'
+  import { machine } from '../lib/machine.svelte.js'
+  import { job, refresh, load, upload, remove, badName } from '../lib/job.svelte.js'
+  import { confirm as ask } from '../lib/confirm.svelte.js'
+
+  let { onclose } = $props()
+  let dialog
+  let picker
+  let selected = $state(null) // entry in the current folder
+  const busy = $derived(machine.conn !== 'open' || machine.status.state !== 'Idle' || job.running || job.upload !== null)
+  const entries = $derived([...job.files].sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name)))
+  const pathOf = e => (job.dir ? `${job.dir}/${e.name}` : e.name)
+  const size = n => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
+
+  onMount(() => {
+    dialog.showModal()
+    refresh(job.dir)
+  })
+  async function go(dir) {
+    selected = null
+    await refresh(dir)
+  }
+  const up = () => go(job.dir.includes('/') ? job.dir.slice(0, job.dir.lastIndexOf('/')) : '')
+  function tap(e) {
+    if (e.dir) go(pathOf(e))
+    else selected = e
+  }
+  async function open() {
+    if (!selected || selected.dir) return
+    await load(pathOf(selected), selected.size)
+    onclose()
+  }
+  async function del() {
+    const e = selected
+    if (!e) return
+    if (!(await ask({ title: `Delete ${e.name}?`, text: e.dir ? 'The folder and everything in it is removed from the SD card.' : 'It is removed from the SD card.', ok: 'Delete', danger: true }))) return
+    selected = null
+    await remove(job.dir, e.name, e.dir)
+  }
+  function pick(ev) {
+    const file = ev.currentTarget.files[0]
+    ev.currentTarget.value = ''
+    if (file) upload(file, job.dir)
+  }
+</script>
+
+<dialog bind:this={dialog} oncancel={e => { e.preventDefault(); onclose() }}>
+  <header>
+    <button onclick={up} disabled={!job.dir}>↑ Up</button>
+    <span class="path mono">/{job.dir}</span>
+    <button onclick={onclose}>Close</button>
+  </header>
+  <section>
+    {#each entries as e (e.name)}
+      <button class="entry" class:on={selected === e} class:dir={e.dir} class:bad={!e.dir && badName(pathOf(e))} ondblclick={() => !e.dir && selected === e && open()} onclick={() => tap(e)} title={!e.dir && badName(pathOf(e)) ? 'FluidNC cannot run this name: rename it' : ''}>
+        <span class="name">{e.dir ? '📁 ' : ''}{e.name}</span>
+        {#if !e.dir}<span class="muted mono">{size(e.size)}</span>{/if}
+      </button>
+    {:else}
+      <p class="muted">Empty folder.</p>
+    {/each}
+    {#if job.upload !== null}<progress max="1" value={job.upload}></progress>{/if}
+    {#if job.error}<p class="err">{job.error}</p>{/if}
+  </section>
+  <footer>
+    <button disabled={busy} onclick={() => picker.click()}>Upload here</button>
+    <input type="file" accept=".nc,.gcode,.ngc,.tap,.cnc,.txt" hidden bind:this={picker} onchange={pick} />
+    <button disabled={busy || !selected} onclick={del}>Delete</button>
+    <button class="go" disabled={busy || !selected || selected.dir || badName(pathOf(selected))} onclick={open}>Open</button>
+  </footer>
+</dialog>
+
+<style>
+  dialog { width: min(100vw, 560px); max-width: 100vw; height: 100vh; max-height: 100vh; margin: 0 auto; padding: 0; border: 0; display: grid; grid-template-rows: auto 1fr auto; color: var(--text); background: var(--bg); }
+  dialog:not([open]) { display: none; }
+  dialog::backdrop { background: rgb(0 0 0 / 0.5); }
+  header, footer { display: flex; gap: 8px; align-items: center; padding: 10px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  footer { border-bottom: 0; border-top: 1px solid var(--line); }
+  .path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--muted); }
+  section { overflow-y: auto; display: grid; align-content: start; gap: 4px; padding: 8px 12px; }
+  .entry { display: grid; grid-template-columns: 1fr auto; gap: 8px; min-height: 48px; text-align: left; }
+  .entry.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, var(--btn)); }
+  .entry.bad .name { color: var(--muted); text-decoration: line-through; }
+  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .muted { margin: 0; font-size: 13px; color: var(--muted); }
+  .err { margin: 0; color: var(--bad); }
+  .go { margin-left: auto; color: white; background: var(--ok); border-color: var(--ok); }
+  @media (min-width: 900px) { dialog { height: 80vh; max-height: 80vh; margin: 10vh auto; border-radius: 14px; } }
+</style>
+```
+
+- [ ] **Step 7: `src/components/Job.svelte`**
+
+- Import `FileBrowser` and add `let browsing = $state(false)`.
+- Remove the whole `.files` block (file head, upload progress, the list and its empty state), the `picker`/`pick` code and the `upload`/`remove`/`refresh` imports that are no longer used (keep `load`/`run`/`pause`/`resume`).
+- Replace the `.head` block with:
+```svelte
+  <div class="head">
+    <div>
+      <strong>{job.name || 'No file open'}</strong>
+      {#if job.data}<span class="muted"> · about {clock(total)}</span>{/if}
+    </div>
+    <button disabled={!idle || job.running} onclick={() => (browsing = true)}>Open…</button>
+  </div>
+  {#if browsing}<FileBrowser onclose={() => (browsing = false)} />{/if}
+```
+- Drop the now-unused `.files`, `.filehead`, `.file`, `.name` styles. `onMount` no longer calls `refresh()`.
+
+- [ ] **Step 8: Build, tests, browser check (the controller does the browser part)**
+
+`npm test` (all passing, process exits) and `npm run build` (no new warnings; compile-check FileBrowser.svelte directly). With the fake: create a folder with `curl 'localhost:8081/upload?path=%2F&action=createdir&filename=jobs'`, open the browser, enter `jobs`, upload there, open the file (the panel shows `jobs/<name>`), Run works (`$SD/Run=/jobs/<name>`), the progress follows; Delete asks and removes; Up returns to the root.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src/lib/files.js src/lib/files.test.js src/lib/job.svelte.js src/components/Job.svelte src/components/FileBrowser.svelte dev
+git commit -m "SD card browser with folders; the Job panel shows only the open file"
+```
+
+---
+
+### Task 15: On the machine (done by the user, hands near the e-stop)
 
 - [ ] **Step 1: Probe Z0.** With the plate on the stock and the clip on: tap, Probe Z0, and check the work Z reads the plate thickness at contact, then 5 mm higher.
 - [ ] **Step 2: A calibration pass.** Set the gantry span. Tape at the four corners. Run the routine and measure. Before pressing Apply, compare the review's numbers with what you'd expect; untick anything doubtful. After the restart and home, check `config.yaml.bak` exists on the flash (More → Console: `$LocalFS/List`).
