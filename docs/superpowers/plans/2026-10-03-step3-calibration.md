@@ -57,6 +57,7 @@
 | `src/App.svelte` (modify) | Tools tab; preview props |
 | `src/components/Preview.svelte` (modify) | Machine coordinates, travel outline, fit toggle; tap to go there |
 | `src/lib/track.js`, `src/lib/job.svelte.js`, `src/components/Job.svelte` (modify) | Progress by time; a time-left estimate that learns |
+| `src/lib/confirm.svelte.js`, `src/components/ConfirmDialog.svelte` (new) | In-app confirmation instead of window.confirm |
 | `dev/fake-fluidnc.js` (modify) | Touch plate and probing, flash files, `$Bye`, `$HZ`, `G4` |
 
 ---
@@ -2145,7 +2146,107 @@ git commit -m "Show job progress by time and a time-left estimate that learns th
 
 ---
 
-### Task 13: On the machine (done by the user, hands near the e-stop)
+### Task 13: In-app confirmation dialog
+
+**Files:**
+- Create: `src/lib/confirm.svelte.js`, `src/components/ConfirmDialog.svelte`
+- Modify: `src/components/Job.svelte` (as left by Task 12), `src/App.svelte` (as left by Task 11)
+
+**Interfaces:**
+- Produces:
+  - `confirm({ title, text?, ok?, danger? }): Promise<boolean>` from `src/lib/confirm.svelte.js`, plus `pending` ($state holding the open request) and `settle(answer)`.
+  - `<ConfirmDialog />`, mounted once in App.svelte: a native `<dialog>` styled with the app's tokens; Cancel, backdrop click and Escape resolve `false`; the OK button (green, or red when `danger`) resolves `true`.
+  - Job.svelte's Run and Delete use it instead of the browser's `window.confirm`.
+
+- [ ] **Step 1: Write `src/lib/confirm.svelte.js`**
+
+```js
+// An in-app confirmation. `confirm({ title, text, ok })` resolves true when the user presses the OK button.
+export const pending = $state({ req: null })
+
+export function confirm({ title, text = '', ok = 'OK', danger = false }) {
+  return new Promise(resolve => {
+    pending.req = { title, text, ok, danger, resolve }
+  })
+}
+
+export function settle(answer) {
+  const r = pending.req
+  pending.req = null
+  r?.resolve(answer)
+}
+```
+
+- [ ] **Step 2: Write `src/components/ConfirmDialog.svelte`**
+
+```svelte
+<script>
+  import { pending, settle } from '../lib/confirm.svelte.js'
+
+  let dialog
+  $effect(() => {
+    if (pending.req) dialog.showModal()
+    else if (dialog?.open) dialog.close()
+  })
+</script>
+
+<dialog bind:this={dialog} oncancel={e => { e.preventDefault(); settle(false) }} onclick={e => e.target === dialog && settle(false)}>
+  {#if pending.req}
+    <div class="box">
+      <h2>{pending.req.title}</h2>
+      {#if pending.req.text}<p>{pending.req.text}</p>{/if}
+      <div class="actions">
+        <button onclick={() => settle(false)}>Cancel</button>
+        <button class:danger={pending.req.danger} class:go={!pending.req.danger} onclick={() => settle(true)}>{pending.req.ok}</button>
+      </div>
+    </div>
+  {/if}
+</dialog>
+
+<style>
+  dialog { width: min(92vw, 420px); padding: 0; border: 1px solid var(--line); border-radius: 14px; color: var(--text); background: var(--panel); }
+  dialog::backdrop { background: rgb(0 0 0 / 0.5); }
+  .box { display: grid; gap: 12px; padding: 20px; }
+  h2 { margin: 0; font-size: 18px; }
+  p { margin: 0; font-size: 15px; line-height: 1.4; color: var(--muted); }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .actions button { min-height: 48px; font-weight: 700; }
+  .go { color: white; background: var(--ok); border-color: var(--ok); }
+  .danger { color: white; background: var(--bad); border-color: var(--bad); }
+</style>
+```
+(The backdrop click works because the dialog has no padding: a click on the box lands on a child, a click outside lands on the dialog itself.)
+
+- [ ] **Step 3: Use it in `src/components/Job.svelte`**
+
+- Add `import { confirm as ask } from '../lib/confirm.svelte.js'`.
+- Replace the Run button's handler `onclick={() => confirm(`Run ${job.name}? Check the bit and work zero first.`) && run()}` with:
+```svelte
+onclick={async () => (await ask({ title: `Run ${job.name}?`, text: 'Check the bit, the work zero, and that the area is clear.', ok: 'Run' })) && run()}
+```
+- Replace the delete button's handler `onclick={() => confirm(`Delete ${f.name} from the SD card?`) && remove(f.name)}` with:
+```svelte
+onclick={async () => (await ask({ title: `Delete ${f.name}?`, text: 'It is removed from the SD card.', ok: 'Delete', danger: true })) && remove(f.name)}
+```
+
+- [ ] **Step 4: Mount it in `src/App.svelte`**
+
+Add `import ConfirmDialog from './components/ConfirmDialog.svelte'` and put `<ConfirmDialog />` on the line after `<TopBar />`.
+
+- [ ] **Step 5: Build and check against the fake (the controller does this step)**
+
+`npm run build` must succeed with no new warnings. Pressing Run shows the in-app dialog (title, text, Cancel, green Run); Escape, the backdrop and Cancel do nothing; Run starts the job. The delete ✕ shows a red Delete button and removes the file.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/lib/confirm.svelte.js src/components/ConfirmDialog.svelte src/components/Job.svelte src/App.svelte
+git commit -m "Replace browser confirm() with an in-app dialog"
+```
+
+---
+
+### Task 14: On the machine (done by the user, hands near the e-stop)
 
 - [ ] **Step 1: Probe Z0.** With the plate on the stock and the clip on: tap, Probe Z0, and check the work Z reads the plate thickness at contact, then 5 mm higher.
 - [ ] **Step 2: A calibration pass.** Set the gantry span. Tape at the four corners. Run the routine and measure. Before pressing Apply, compare the review's numbers with what you'd expect; untick anything doubtful. After the restart and home, check `config.yaml.bak` exists on the flash (More → Console: `$LocalFS/List`).
