@@ -12,7 +12,7 @@
   - `flash.js`: files on the board's flash (read through the websocket, write through HTTP).
   - `calibration.js`: the calibration routine as an async script that asks the UI for each manual step.
 - **App state:** `settings.svelte.js` becomes board-backed (`highroller.json`); `machine.svelte.js` loads the config file and the axis limits.
-- **UI:** zeroing buttons on the Jog tab; a Tools tab listing the Calibrate routine, which runs in a full-screen dialog with its own STOP.
+- **UI:** zeroing buttons on the Jog tab; a Tools tab listing the Calibrate routine, which runs in a full-screen dialog with its own STOP; the preview drawn in machine coordinates with the travel outline (user request, 2026-10-03).
 - **Fake controller:** gains a touch plate, `$LocalFS/Show`, flash uploads, `$Bye`, per-axis homing and `G4` waits.
 
 **Tech Stack:** Svelte 5, Vite, Node 22 `node:test`, `ws` (dev only).
@@ -54,7 +54,8 @@
 | `src/components/Dro.svelte` (modify) | Probe Z0, Go to XY0, Raise Z |
 | `src/components/Tools.svelte` (new) | The Tools list and the Settings form |
 | `src/components/Calibrate.svelte` (new) | The wizard dialog driven by `calibrate(io)` |
-| `src/App.svelte` (modify) | Tools tab |
+| `src/App.svelte` (modify) | Tools tab; preview props |
+| `src/components/Preview.svelte` (modify) | Machine coordinates, travel outline, fit toggle |
 | `dev/fake-fluidnc.js` (modify) | Touch plate and probing, flash files, `$Bye`, `$HZ`, `G4` |
 
 ---
@@ -1663,7 +1664,142 @@ git commit -m "Add the Tools tab with settings and the Calibrate dialog"
 
 ---
 
-### Task 9: On the machine (done by the user, hands near the e-stop)
+### Task 9: Preview in machine coordinates, with the travel outline
+
+**Files:**
+- Modify: `src/components/Preview.svelte`, `src/App.svelte`
+
+**Interfaces:**
+- Consumes: `machine.status.mpos`, `machine.status.wpos`, `machine.status.wco` (from step 1's status parser: work = machine − wco) and `machine.config.range` (Task 5).
+- Produces: `<Preview job current mpos wpos wco range />`. Everything is drawn in machine coordinates: the toolpath (work coordinates in the file) shifted by `wco`, the tool at `mpos`, and a dashed outline of the X/Y travel when `range` is known. Red/green still follow work Z. The view opens fitted to the travel rectangle; a double-tap or double-click toggles between fitting the table and fitting the job.
+
+- [ ] **Step 1: Edit `src/components/Preview.svelte`**
+
+a) Replace the props line and its comment with:
+```js
+  // Drawn in machine coordinates: the file's work coordinates shifted by the work offset `wco`, the tool at
+  // `mpos`. `wpos` supplies the work Z for the red/green rule; `range` is the X/Y travel, if known.
+  let { job = null, current = -1, mpos = [0, 0, 0], wpos = [0, 0, 0], wco = [0, 0, 0], range = null } = $props()
+```
+
+b) After the `sx`/`sy` helpers add:
+```js
+  const jx = x => sx(x + wco[0]) // a job (work) coordinate on screen
+  const jy = y => sy(y + wco[1])
+```
+
+c) In `drawBase`, replace `if (!job) return` with:
+```js
+    if (range) { // the machine's reach
+      ctx.setLineDash([6, 4])
+      ctx.strokeStyle = colors.path
+      ctx.lineWidth = 1
+      ctx.strokeRect(sx(range.X.min), sy(range.Y.max), (range.X.max - range.X.min) * view.scale, (range.Y.max - range.Y.min) * view.scale)
+      ctx.setLineDash([])
+    }
+    if (!job) return
+```
+and change the two `moveTo`/`lineTo` lines in `drawBase` to use `jx`/`jy`:
+```js
+        ctx.moveTo(jx(p[i * 3]), jy(p[i * 3 + 1]))
+        ctx.lineTo(jx(p[i * 3 + 3]), jy(p[i * 3 + 4]))
+```
+
+d) In `drawTrail`, change its `moveTo`/`lineTo` lines the same way (`jx`/`jy`).
+
+e) In `drawDot`, replace
+```js
+    const below = pos[2] < 0
+    const x = sx(pos[0]), y = sy(pos[1])
+```
+with
+```js
+    const below = wpos[2] < 0
+    const x = sx(mpos[0]), y = sy(mpos[1])
+```
+and change its `ctx.moveTo(sx(p[current * 3]), sy(p[current * 3 + 1]))` to `ctx.moveTo(jx(p[current * 3]), jy(p[current * 3 + 1]))`.
+
+f) Replace the `fit` function with:
+```js
+  // Fit the travel rectangle, or the job (a double-tap toggles). Falls back to whichever exists, then to 100 mm.
+  let fitMode = 'table'
+  function fit() {
+    const jb = job && job.bounds.minX <= job.bounds.maxX
+      ? { minX: job.bounds.minX + wco[0], maxX: job.bounds.maxX + wco[0], minY: job.bounds.minY + wco[1], maxY: job.bounds.maxY + wco[1] }
+      : null
+    const tb = range ? { minX: range.X.min, maxX: range.X.max, minY: range.Y.min, maxY: range.Y.max } : null
+    const b = (fitMode === 'table' ? tb ?? jb : jb ?? tb) ?? { minX: 0, minY: 0, maxX: 100, maxY: 100 }
+    const w = Math.max(b.maxX - b.minX, 1), h = Math.max(b.maxY - b.minY, 1)
+    view.scale = 0.9 * Math.min(size.w / w, size.h / h)
+    view.ox = size.w / 2 - ((b.minX + b.maxX) / 2) * view.scale
+    view.oy = size.h / 2 + ((b.minY + b.maxY) / 2) * view.scale
+    redraw()
+  }
+  function toggleFit() {
+    fitMode = fitMode === 'table' ? 'job' : 'table'
+    fit()
+  }
+```
+
+g) Replace the three effects with:
+```js
+  // A new file or a newly known travel: refit.
+  $effect(() => {
+    job
+    range
+    if (size.w) fit()
+  })
+  // A changed work offset moves the drawn toolpath (only when the values really changed: the array is renewed often).
+  let drawnWco = ''
+  $effect(() => {
+    const w = wco.join(',')
+    if (size.w && w !== drawnWco) {
+      drawnWco = w
+      redraw()
+    }
+  })
+  // Progress: add newly finished segments to the trail (or start over if it went backwards).
+  $effect(() => {
+    current
+    if (size.w && !raf) drawTrail(current < drawnTo ? -1 : drawnTo)
+  })
+  $effect(() => {
+    mpos
+    wpos
+    current
+    if (size.w && !raf) drawDot()
+  })
+```
+
+h) In the markup, change `ondblclick={fit}` to `ondblclick={toggleFit}`, and the hint text to `Load a file to preview it here. Dashed line: the machine's reach.` only when `range` exists:
+```svelte
+  {#if !job}<p class="hint">{range ? 'Load a file to see it on the table' : 'Load a file to preview it here'}</p>{/if}
+```
+
+- [ ] **Step 2: Mount it with the new props in `src/App.svelte`**
+
+Replace the `<Preview … />` line with:
+```svelte
+    <Preview job={job.data} current={job.current} mpos={machine.status.mpos} wpos={machine.status.wpos} wco={machine.status.wco} range={machine.config?.range} />
+```
+
+- [ ] **Step 3: Build and check against the fake (the controller does this step)**
+
+`npm run build` must succeed with no new warnings. Then with the fake and dev server, after unlocking:
+- The Job tab shows a dashed rectangle (the fake's config: X 3–1223, Y 3–2443) fitted to the view, with the green dot at the machine origin.
+- Load `square.nc`: it is drawn near the origin, small. Double-click fits the job; double-click again fits the table.
+- In the console, `G0 X100 Y200`, then press Zero on X and Y: the toolpath jumps so its origin sits under the dot (machine 100, 200). Run the job: the dot and trail follow it there.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/components/Preview.svelte src/App.svelte
+git commit -m "Draw the preview in machine coordinates with the travel outline"
+```
+
+---
+
+### Task 10: On the machine (done by the user, hands near the e-stop)
 
 - [ ] **Step 1: Probe Z0.** With the plate on the stock and the clip on: tap, Probe Z0, and check the work Z reads the plate thickness at contact, then 5 mm higher.
 - [ ] **Step 2: A calibration pass.** Set the gantry span. Tape at the four corners. Run the routine and measure. Before pressing Apply, compare the review's numbers with what you'd expect; untick anything doubtful. After the restart and home, check `config.yaml.bak` exists on the flash (More → Console: `$LocalFS/List`).
