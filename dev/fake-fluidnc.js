@@ -21,6 +21,7 @@ export function start(port = 8081) {
   const clients = new Set()
   let ri = 0 // ponytail: one shared report interval; FluidNC keeps one per client
   let lastReport = 0
+  let wifi = 70 // simulated signal %, wanders a little
 
   const send = (ws, text) => ws.send(Buffer.from(text + '\r\n'), { binary: true })
   const broadcast = text => { for (const ws of clients) send(ws, text) }
@@ -97,6 +98,12 @@ export function start(port = 8081) {
     }
     const l = text.trim().toUpperCase()
     if (!l) return
+    if (l === '$SYSTEM/STATS') { // just enough of ESP420 for the Wi-Fi indicator
+      wifi = clamp(wifi + Math.random() * 10 - 5, 55, 85)
+      reply('Current WiFi Mode: STA')
+      reply(`Signal: ${Math.round(wifi)}%`)
+      return ok()
+    }
     if (l.startsWith('$RI=')) { ri = Number(l.slice(4)); status(ws); return ok() }
     if (l === '$X') { m.state = 'Idle'; status(); reply('[MSG:INFO: Caution: Unlocked]'); return ok() }
     if (l === '$H') {

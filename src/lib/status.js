@@ -49,6 +49,12 @@ export function parseStatus(line, prev = EMPTY) {
   return s
 }
 
+// Wi-Fi signal as the controller sees it, from $System/Stats ("Signal: 78%" as a station; no such line as an access point).
+export function wifiPercent(lines) {
+  const m = lines.map(l => /^Signal:\s*(\d+)%/.exec(l)).find(Boolean)
+  return m ? Number(m[1]) : null
+}
+
 // Plain-language reasons for FluidNC ALARM:n codes (names from FluidNC Protocol.cpp).
 export const ALARMS = {
   1: 'A limit switch was hit while moving. Position may be off, so home again.',

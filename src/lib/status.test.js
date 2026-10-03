@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseStatus, EMPTY } from './status.js'
+import { parseStatus, EMPTY, wifiPercent } from './status.js'
 
 test('parses state, machine position, work offset and work position', () => {
   const s = parseStatus('<Idle|MPos:10.000,20.000,-5.000|FS:0,0|WCO:1.000,2.000,-3.000>')
@@ -60,4 +60,9 @@ test('does not mutate the previous status', () => {
 test('a file FluidNC has finished reading reports 100 %', () => {
   const s = parseStatus('<Run|MPos:0,0,0|FS:0,0|SD: /sd/job.nc: Sent>')
   assert.deepEqual(s.sd, { percent: 100, file: '/sd/job.nc' })
+})
+
+test('wifiPercent reads the Signal line of $System/Stats, or null without one', () => {
+  assert.equal(wifiPercent(['Current WiFi Mode: STA', 'Signal: 78%', 'Hostname: fluidnc']), 78)
+  assert.equal(wifiPercent(['Current WiFi Mode: AP']), null)
 })

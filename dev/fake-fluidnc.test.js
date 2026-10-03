@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { start } from './fake-fluidnc.js'
 import { FluidNC } from '../src/lib/fluidnc.js'
+import { wifiPercent } from '../src/lib/status.js'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -83,4 +84,20 @@ test('feed override bytes change the reported override', async () => {
   assert.deepEqual(fnc.status.ov, [111, 100, 100])
   fnc.close()
   server.close()
+})
+
+test('$System/Stats reports a Wi-Fi signal percentage', async () => {
+  const server = start(8094)
+  const fnc = new FluidNC({ host: 'localhost:8094' })
+  try {
+    const opened = new Promise(r => { fnc.onConnection = c => c === 'open' && r() })
+    fnc.connect()
+    await opened
+    const r = await fnc.send('$System/Stats', { quiet: true })
+    const pct = wifiPercent(r.lines)
+    assert.ok(pct >= 55 && pct <= 85, `signal=${pct}`)
+  } finally {
+    fnc.close()
+    server.close()
+  }
 })

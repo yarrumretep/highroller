@@ -15,6 +15,16 @@
   <span class="conn" class:open={machine.conn === 'open'}>
     {machine.conn === 'open' ? 'Connected' : machine.everOpen ? 'Reconnecting…' : 'Connecting…'}
   </span>
+  {#if machine.conn === 'open' && machine.wifi !== null}
+    <span class="wifi" class:weak={machine.wifi < 25} title="Wi-Fi signal at the controller">
+      <svg viewBox="0 0 19 12" width="19" height="12" aria-hidden="true">
+        {#each [1, 25, 50, 75] as level, i}
+          <rect x={i * 5} y={9 - i * 3} width="4" height={3 + i * 3} rx="1" class:on={machine.wifi >= level} />
+        {/each}
+      </svg>
+      <span class="mono">{machine.wifi}%</span>
+    </span>
+  {/if}
   <span class="state {tone}">{machine.conn === 'open' ? state : '–'}</span>
   <button class="stop" onpointerdown={e => { e.preventDefault(); stop() }} onclick={e => e.detail === 0 && stop()} oncontextmenu={e => e.preventDefault()}>STOP</button>
 </header>
@@ -49,6 +59,10 @@
   .conn { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
   .conn::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--warn); }
   .conn.open::before { background: var(--ok); }
+  .wifi { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+  .wifi rect { fill: var(--line); }
+  .wifi rect.on { fill: var(--ok); }
+  .wifi.weak rect.on { fill: var(--warn); }
   .state { font-weight: 700; padding: 4px 12px; border-radius: 999px; background: var(--btn); }
   .state.ok { background: var(--ok); color: white; }
   .state.warn { background: var(--warn); color: white; }
