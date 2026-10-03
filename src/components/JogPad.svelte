@@ -26,11 +26,11 @@
   let press = null
   let pad
 
-  function down(axis, dir) {
+  function down(axis, dir, pointerId) {
     if (!ready || press) return
     const feed = axis === 'Z' ? feedZ : feedXY
     const step = axis === 'Z' ? Math.min(settings.step, Z_STEP_MAX) : settings.step
-    const p = { held: false, tap: () => jogger.step(axis, dir * step, feed) }
+    const p = { held: false, pointerId, tap: () => jogger.step(axis, dir * step, feed) }
     p.timer = setTimeout(() => { p.held = true; jogger.start(axis, dir, feed) }, HOLD_MS)
     press = p
   }
@@ -58,11 +58,17 @@
   // STOP also cancels a press still waiting to become a hold.
   $effect(() => { machine.stops; cancel() })
 
+  // One finger per press: other fingers and non-main mouse buttons are ignored.
+  const mine = e => press?.pointerId === e.pointerId
   const pointer = (axis, dir) => ({
-    onpointerdown: e => { e.currentTarget.setPointerCapture(e.pointerId); down(axis, dir) },
-    onpointerup: up,
-    onpointercancel: cancel,
-    onlostpointercapture: cancel,
+    onpointerdown: e => {
+      if (e.button !== 0) return
+      e.currentTarget.setPointerCapture(e.pointerId)
+      down(axis, dir, e.pointerId)
+    },
+    onpointerup: e => mine(e) && up(),
+    onpointercancel: e => mine(e) && cancel(),
+    onlostpointercapture: e => mine(e) && cancel(),
     oncontextmenu: e => e.preventDefault(),
   })
 
