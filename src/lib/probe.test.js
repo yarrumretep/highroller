@@ -9,7 +9,7 @@ function fakeFnc(contacts) {
     f.sent.push(line)
     if (!line.includes('G38.2')) return Promise.resolve({ ok: true, error: null, lines: [] })
     const z = contacts.shift()
-    if (z === undefined) return Promise.resolve({ ok: false, error: 5, lines: ['[PRB:0.000,0.000,-19.000:0]', 'ALARM:5'] })
+    if (z === undefined) return Promise.resolve({ ok: true, error: null, lines: ['[PRB:0.000,0.000,-19.000:0]', 'ALARM:5'] }) // what FluidNC really sends
     return Promise.resolve({ ok: true, error: null, lines: [`[PRB:10.000,20.000,${z.toFixed(3)}:1]`] })
   }
   return f
@@ -51,4 +51,16 @@ test('options change the feeds, distances and touch count', async () => {
   const r = await probeZ(f, { fast: 100, slow: 10, maxDown: 8, backoff: 0.5, touches: 2 })
   assert.equal(r.z, -5)
   assert.deepEqual(f.sent, ['G91', 'G38.2 Z-8 F100', 'G0 Z0.5', 'G38.2 Z-1 F10', 'G0 Z0.5', 'G38.2 Z-1 F10', 'G90'])
+})
+
+test('an even number of touches averages the two middle values', async () => {
+  const f = fakeFnc([-5, -5.01, -5.03])
+  const r = await probeZ(f, { touches: 2 })
+  assert.ok(Math.abs(r.z - -5.02) < 1e-9, `z=${r.z}`)
+})
+
+test('a disconnect mid-probe is reported as refused', async () => {
+  const f = fakeFnc([-5])
+  f.send = line => Promise.resolve(line.includes('G38.2') ? { ok: false, error: 'disconnected', lines: [] } : { ok: true, error: null, lines: [] })
+  await assert.rejects(probeZ(f), /Probe refused: error disconnected/)
 })

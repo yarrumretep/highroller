@@ -9,10 +9,12 @@ const prbZ = lines => {
 
 export async function probeZ(fnc, opts = {}) {
   const o = { ...DEFAULTS, ...opts }
+  if (!(o.touches >= 1)) throw new Error('touches must be at least 1')
   const quiet = line => fnc.send(line, { quiet: true })
   const probe = async (mm, feed) => {
     const r = await fnc.send(`G38.2 Z-${+mm.toFixed(3)} F${feed}`)
-    if (r.error === 5 || r.lines.some(l => /^\[PRB:[^\]]*:0\]/.test(l))) throw new Error('No contact: is the plate under the bit and the clip attached?')
+    // A miss prints [PRB:…:0] and ALARM:5 before the reply; FluidNC is then in alarm.
+    if (r.lines.some(l => /^\[PRB:[^\]]*:0\]/.test(l) || l.startsWith('ALARM:5'))) throw new Error('No contact: is the plate under the bit and the clip attached?')
     if (!r.ok) throw new Error(`Probe refused: error ${r.error}`)
     const z = prbZ(r.lines)
     if (Number.isNaN(z)) throw new Error('Probe refused: no [PRB:] report')
@@ -29,7 +31,9 @@ export async function probeZ(fnc, opts = {}) {
     const sorted = [...touches].sort((a, b) => a - b)
     const spread = sorted.at(-1) - sorted[0]
     if (spread > o.tolerance) throw new Error(`Touches differ by ${spread.toFixed(3)} mm. Clean the plate and try again.`)
-    return { z: sorted[Math.floor(sorted.length / 2)], spread, touches }
+    const n = sorted.length
+    const z = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
+    return { z, spread, touches }
   } finally {
     await quiet('G90')
   }
