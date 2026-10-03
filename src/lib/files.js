@@ -2,8 +2,11 @@
 // `base` is '' in the app: same origin on the board, and Vite proxies these paths in dev.
 // ponytail: root folder only.
 
+// FluidNC puts the outcome in `status`: "Ok", "<name> deleted"/"created"/"renamed to …", or an error such as "Upload failed".
+const succeeded = s => s === 'Ok' || / (deleted|created)$/.test(s) || / renamed to /.test(s)
+
 export function parseList(json) {
-  if (!Array.isArray(json.files) || /fail|cannot/i.test(json.status ?? '')) throw new Error(json.status || 'No file list')
+  if (!Array.isArray(json.files) || !succeeded(json.status ?? 'Ok')) throw new Error(json.status || 'No file list')
   return json.files.map(f => ({ name: f.name, size: Number(f.size), dir: Number(f.size) < 0 }))
 }
 

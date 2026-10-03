@@ -16,6 +16,11 @@ test('parseList turns FluidNC error statuses into errors', () => {
   assert.throws(() => parseList({ files: [], status: 'Cannot delete a.nc' }), /Cannot delete/)
 })
 
+test('parseList trusts FluidNC success statuses even when the file name looks like an error', () => {
+  assert.deepEqual(parseList({ files: [], status: 'failed_job.nc deleted' }), [])
+  assert.throws(() => parseList({ files: [], status: 'Cannot delete failed_job.nc Invalid argument' }), /Cannot delete/)
+})
+
 test('lists, downloads and deletes files on the fake controller', async () => {
   const server = start(8095)
   try {
