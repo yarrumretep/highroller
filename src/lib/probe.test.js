@@ -46,10 +46,24 @@ test('rejects touches that disagree by more than the tolerance', async () => {
   assert.equal(f.sent.at(-1), 'G90')
 })
 
-test('no contact stops at once with a clear error, and unlocks to restore G90', async () => {
+test('no contact stops at once with a clear error, and unlocks (only after a detected miss) to restore G90', async () => {
   const f = fakeFnc([])
   await assert.rejects(probeZ(f), /No contact/)
-  assert.deepEqual(f.sent, ['G91', 'G38.2 Z-20 F300', 'G90', '$X', 'G90'])
+  assert.deepEqual(f.sent, ['G91', 'G38.2 Z-20 F300', '$X', 'G90'])
+})
+
+test('a G90 refusal with no detected miss does not unlock', async () => {
+  const f = fakeFnc([-5, -5])
+  const sent = []
+  const real = f.send
+  f.send = line => {
+    sent.push(line)
+    if (line === 'G90') return Promise.resolve({ ok: false, error: 9, lines: [] })
+    return real(line)
+  }
+  await probeZ(f, { touches: 1 })
+  assert.deepEqual(sent.filter(l => l === '$X'), [])
+  assert.equal(sent.at(-1), 'G90')
 })
 
 test('options change the feeds, distances and touch count', async () => {

@@ -65,7 +65,7 @@
     {:else if s.state === 'Run'}
       <button disabled={machine.stopping} onclick={pause}>Pause</button>
     {:else}
-      <button class="go" disabled={!idle || !job.data || running || job.starting} onclick={async () => (await ask({ title: `Run ${job.name}?`, text: 'Check the bit, the work zero, and that the area is clear.', ok: 'Run' })) && run()}>Run</button>
+      <button class="go" disabled={!idle || !job.data || running || job.starting || job.upload !== null} onclick={async () => (await ask({ title: `Run ${job.name}?`, text: 'Check the bit, the work zero, and that the area is clear.', ok: 'Run' })) && run()}>Run</button>
     {/if}
   </div>
 

@@ -137,6 +137,13 @@ export class FluidNC {
     }
     const c = this.inflight
     if (!c?.quiet || /^(ALARM:|\[MSG:|Grbl )/.test(line)) this.onLine(line)
+    // A restart from elsewhere (another client, the reset pin, $Bye) prints this banner and never
+    // answers what was in flight. Our own reset() already fails the queue before the banner arrives,
+    // so this only fires when something else restarted the controller.
+    if (c && line.startsWith('Grbl ')) {
+      this._failAll('controller restarted')
+      return
+    }
     if (!c) return
     if (line === 'ok' || line.startsWith('error:')) {
       this.inflight = null

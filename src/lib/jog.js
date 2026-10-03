@@ -15,14 +15,19 @@ export function createJogger(fnc, now = () => Date.now()) {
     stop()
     const i = AXES.indexOf(axis)
     const mmPerMs = feed / 60000
-    const startPos = fnc.status.mpos[i]
+    const startPos = fnc.status.mpos?.[i] // null before the first WCO report: position unknown
     const h = { until: now(), sent: 0 }
+    // FluidNC caps jog speed at the axis max rate, so also bound what is queued by distance travelled.
+    // mpos is null before the first WCO report: skip that bound rather than throw on an unknown position.
+    const withinDistance = () => {
+      const pos = fnc.status.mpos
+      if (!pos || startPos == null) return true
+      return h.sent - Math.abs(pos[i] - startPos) < mmPerMs * MAX_QUEUED_MS
+    }
     const tick = () => {
       const t = now()
       h.until = Math.max(h.until, t)
-      // FluidNC caps jog speed at the axis max rate, so also bound what is queued by distance travelled.
-      const travelled = Math.abs(fnc.status.mpos[i] - startPos)
-      while (h.until - t < AHEAD_MS && h.sent - travelled < mmPerMs * MAX_QUEUED_MS) {
+      while (h.until - t < AHEAD_MS && withinDistance()) {
         jog(axis, dir * mmPerMs * CHUNK_MS, feed).then(r => {
           // This move may have reached FluidNC just after the release's cancel: cancel again.
           if (r.ok && hold === null) fnc.jogCancel()

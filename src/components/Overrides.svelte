@@ -18,6 +18,14 @@
     if (ov[0] === targets.feed) targets.feed = null
     if (ov[2] === targets.spindle) targets.spindle = null
   })
+  // The controller resets overrides to 100 on STOP, and a reconnect starts from an unknown value:
+  // forget any target that was never reached, or the next drag computes from a stale one.
+  $effect(() => {
+    machine.stops
+    machine.conn
+    targets.feed = null
+    targets.spindle = null
+  })
 </script>
 
 <div class="panel ov">

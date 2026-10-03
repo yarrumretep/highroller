@@ -89,6 +89,16 @@ test('a machine slower than commanded never gets more than 0.6 s of jog distance
   j.stop()
 })
 
+test('an unknown machine position does not throw and still sends a jog', t => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'] })
+  const f = fakeFnc()
+  f.status.mpos = null // before the first WCO report
+  const j = createJogger(f)
+  assert.doesNotThrow(() => j.start('X', 1, 3000))
+  assert.ok(f.sent.length > 0)
+  j.stop()
+})
+
 test('a late timer tick does not send a burst of catch-up moves', t => {
   t.mock.timers.enable({ apis: ['setInterval', 'Date'] })
   const f = fakeFnc()

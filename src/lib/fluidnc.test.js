@@ -164,10 +164,35 @@ test('quiet commands keep their output out of onLine, except alarms and messages
   ws().open()
   ws().rx('ok\n') // answers $RI=100, which is not quiet
   const p = fnc.send('$/axes/z/max_rate_mm_per_min', { quiet: true })
+  ws().rx('$/axes/z/max_rate_mm_per_min=900.000\nALARM:1\n[MSG:ERR: Bad GCode]\nok\n')
+  assert.deepEqual((await p).lines, ['$/axes/z/max_rate_mm_per_min=900.000', 'ALARM:1', '[MSG:ERR: Bad GCode]'])
+  assert.deepEqual(events.lines, ['ok', 'ALARM:1', '[MSG:ERR: Bad GCode]'])
+})
+
+test('a restart banner fails the in-flight command, reaches onLine despite quiet, and later commands work', async t => {
+  const { fnc, ws, events } = setup(t)
+  ws().open()
+  ws().rx('ok\n') // answers $RI=100
+  const p = fnc.send('$/axes/z/max_rate_mm_per_min', { quiet: true })
   const banner = "Grbl 3.9 [FluidNC v3.9.9 (wifi) '$' for help]"
-  ws().rx(`$/axes/z/max_rate_mm_per_min=900.000\nALARM:1\n[MSG:ERR: Bad GCode]\n${banner}\nok\n`)
-  assert.deepEqual((await p).lines, ['$/axes/z/max_rate_mm_per_min=900.000', 'ALARM:1', '[MSG:ERR: Bad GCode]', banner])
-  assert.deepEqual(events.lines, ['ok', 'ALARM:1', '[MSG:ERR: Bad GCode]', banner])
+  ws().rx(`${banner}\n`) // FluidNC restarted elsewhere and never answers the line in flight
+  assert.deepEqual(await p, { ok: false, error: 'controller restarted', lines: [] })
+  assert.deepEqual(events.lines, ['ok', banner])
+  const q = fnc.send('G0 X1')
+  ws().rx('ok\n')
+  assert.equal((await q).ok, true)
+})
+
+test("the app's own reset is unaffected when the banner then arrives", async t => {
+  const { fnc, ws } = setup(t)
+  ws().open()
+  const p = fnc.send('G0 X100')
+  fnc.reset() // already fails the queue before the banner arrives
+  assert.equal((await p).error, 'reset')
+  ws().rx("Grbl 3.9 [FluidNC v3.9.9 (wifi) '$' for help]\n") // finds nothing in flight
+  const q = fnc.send('G0 X1')
+  ws().rx('ok\n')
+  assert.equal((await q).ok, true)
 })
 
 test('hold, resume and jogCancel send their real-time bytes', t => {

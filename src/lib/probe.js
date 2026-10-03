@@ -11,10 +11,14 @@ export async function probeZ(fnc, opts = {}) {
   const o = { ...DEFAULTS, ...opts }
   if (!(o.touches >= 1)) throw new Error('touches must be at least 1')
   const quiet = line => fnc.send(line, { quiet: true })
+  let missed = false
   const probe = async (mm, feed) => {
     const r = await fnc.send(`G38.2 Z-${+mm.toFixed(3)} F${feed}`)
     // A miss prints [PRB:…:0] and ALARM:5 before the reply; FluidNC is then in alarm.
-    if (r.lines.some(l => /^\[PRB:[^\]]*:0\]/.test(l) || l.startsWith('ALARM:5'))) throw new Error('No contact: is the plate under the bit and the clip attached?')
+    if (r.lines.some(l => /^\[PRB:[^\]]*:0\]/.test(l) || l.startsWith('ALARM:5'))) {
+      missed = true
+      throw new Error('No contact: is the plate under the bit and the clip attached?')
+    }
     if (!r.ok) throw new Error(`Probe refused: error ${r.error}`)
     const z = prbZ(r.lines)
     if (Number.isNaN(z)) throw new Error('Probe refused: no [PRB:] report')
@@ -35,11 +39,9 @@ export async function probeZ(fnc, opts = {}) {
     const z = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
     return { z, spread, touches }
   } finally {
-    // After a miss FluidNC is in alarm and refuses G-code until unlocked
-    const r = await quiet('G90')
-    if (!r.ok) {
-      await quiet('$X')
-      await quiet('G90')
-    }
+    // After a miss FluidNC is in alarm ("position may be lost") and refuses G-code until unlocked.
+    // A G90 refused for some other reason does not mean an alarm that $X should clear.
+    if (missed) await quiet('$X')
+    await quiet('G90')
   }
 }

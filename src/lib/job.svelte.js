@@ -95,6 +95,10 @@ export async function remove(name) {
 // One job at a time: FluidNC would queue a second $SD/Run and start it straight after the first.
 export async function run() {
   if (job.starting || !idleNoJob()) return
+  if (job.upload !== null) {
+    job.error = 'Wait until the upload has finished'
+    return
+  }
   if (badName(job.name)) {
     job.error = cannotRun(job.name)
     return
@@ -118,9 +122,11 @@ $effect.root(() => {
   $effect(() => {
     const s = machine.status
     untrack(() => {
-      if (s.state === 'Hold' && !heldSince) heldSince = Date.now()
-      else if (s.state !== 'Hold' && heldSince) {
-        job.pausedMs += Date.now() - heldSince
+      if (s.state === 'Hold') {
+        const now = Date.now()
+        if (heldSince) job.pausedMs += now - heldSince
+        heldSince = now
+      } else {
         heldSince = 0
       }
       if (!s.sd) {
