@@ -86,9 +86,16 @@ test('one pass: probes, dots, measurements, and a single config write with every
   assert.equal(getValue(applied, 'axes/y/steps_per_mm'), '50.000') // sides matched: untouched
   assert.equal(io.settings.lastSkewMm.toFixed(3), '1.071')
 
-  // F4: the "make the dot" step previews the exact line that is then sent for that corner
-  const dotStep = rec.steps.find(st => st.title === 'Corner A: make the dot')
-  assert.ok(dotStep.lines.includes('G53 G1 Z-50.1 F100'))
+  // F4: "make the dot" previews exactly what Continue goes on to send, through the rapid to the next corner
+  const dotStepA = rec.steps.find(st => st.title === 'Corner A: make the dot')
+  assert.deepEqual(dotStepA.lines, rec.sent.slice(a + 2, a + 11))
+  // ... and after D, just the one final rapid up (no corner to move to)
+  const dotStepD = rec.steps.find(st => st.title === 'Corner D: make the dot')
+  assert.equal(dotStepD.lines.length, 8)
+  assert.equal(dotStepD.lines.at(-1), 'G53 G0 Z3')
+
+  // The review previews Apply's own moves ($Bye restarts the board; $H is a move too)
+  assert.deepEqual(rec.review.lines, ['$Bye', '$H'])
 })
 
 test('unticked changes are not applied, and skipped side measurements leave steps/mm alone', async () => {

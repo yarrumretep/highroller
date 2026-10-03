@@ -3,11 +3,11 @@
   import { settings } from '../lib/settings.svelte.js'
 
   let { onstart } = $props()
-  // A blank or invalid field keeps the previous value rather than becoming 0.
+  // A blank, invalid or negative field keeps the previous value rather than becoming 0 (or negative).
   const num = (key, e) => {
     const v = e.currentTarget.value
     const n = Number(v)
-    if (v === '' || !Number.isFinite(n)) { e.currentTarget.value = settings[key]; return }
+    if (v === '' || !Number.isFinite(n) || n < 0) { e.currentTarget.value = settings[key]; return }
     settings[key] = n
   }
 </script>

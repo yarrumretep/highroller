@@ -22,6 +22,7 @@
   let resolve = null // settles the pending io call
   let reject = null // rejects it, so STOP/Cancel/unmount end the routine rather than letting it run on
   let primaryBtn = $state() // the step/ask/review's own action button, focused instead of STOP
+  let selfClosed = false // true once we've asked the dialog to close itself (see the native onclose below)
 
   // Probe arming for steps with `arm`: the probe input must close and open again.
   let seenClosed = false
@@ -39,7 +40,7 @@
   const canCancel = $derived(view.kind !== 'busy')
   const closeLabel = $derived(view.kind === 'done' || view.kind === 'error' || (view.kind === 'review' && !view.changes.length) ? 'Close' : 'Cancel')
 
-  $effect(() => { view; primaryBtn?.focus() })
+  $effect(() => { view; armed; pinClosed; primaryBtn?.focus() })
 
   const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -68,36 +69,50 @@
     async apply(text) {
       throwIfStopped()
       const { name, text: old } = machine.config
+      // Once `written`, the new config is on flash even if the routine stops here; once `restarted`,
+      // $Bye has gone out and the board is on its way down — a STOP here can no longer undo either,
+      // so the "Stopped" message says exactly how far it got instead of just "Stopped".
+      let written = false, restarted = false
+      const checkStopped = () => {
+        if (!stopped) return
+        if (!written) throw stopped
+        if (!restarted) throw new Error(`Stopped. The new config is on the board's flash as ${name} but not loaded; ${name}.bak holds the old one.`)
+        throw new Error(`Stopped. The board is restarting with the new ${name} and has not been homed; ${name}.bak holds the old one.`)
+      }
       // ponytail: the .bak is read back over the websocket ($LocalFS/Show), which drops blank lines; it is
       // line-exact otherwise, which is all a backup needs to be.
       if (!backedUp) { await writeFlash(`${name}.bak`, old); backedUp = true }
-      throwIfStopped()
+      checkStopped()
       await writeFlash(name, text)
+      written = true
       machine.config = null // the file on flash no longer matches what's loaded; stays unknown until the restart reloads it
-      throwIfStopped()
+      checkStopped()
       if (machine.conn !== 'open') throw new Error(`Lost the connection before the restart. The new config is on the board's flash as ${name}; ${name}.bak holds the old one.`)
-      const staleStatus = machine.status // the report from before $Bye; still around after reconnecting, so it must not be mistaken for a fresh one
       const r = await sendLine('$Bye')
-      throwIfStopped()
+      checkStopped()
       if (!(r.ok || r.error === 'disconnected')) throw new Error(`$Bye failed: ${r.error}`)
+      restarted = true
       view = { kind: 'busy', text: 'Restarting the controller…' }
       const t0 = Date.now()
       while (machine.conn === 'open') {
         if (Date.now() - t0 > 5000) throw new Error('The board did not restart; the new config is written but not loaded')
-        throwIfStopped()
+        checkStopped()
         await sleep(100)
-        throwIfStopped()
+        checkStopped()
       }
+      // Captured now, not before $Bye: a status report that arrived just before the link actually
+      // dropped would otherwise look "fresh" (a new object) while still being pre-restart data.
+      const staleStatus = machine.status
       const deadline = t0 + 60000
       while (!(machine.conn === 'open' && machine.status !== staleStatus && (machine.status.state === 'Idle' || machine.status.state === 'Alarm'))) {
         if (Date.now() > deadline) throw new Error(`The controller did not come back after the restart. The new config is on the board's flash as ${name}; ${name}.bak holds the old one.`)
-        throwIfStopped()
+        checkStopped()
         await sleep(200)
-        throwIfStopped()
+        checkStopped()
       }
       view = { kind: 'busy', text: 'Homing…' }
       const hr = await sendLine('$H')
-      throwIfStopped()
+      checkStopped()
       if (!hr.ok) throw new Error(`$H failed: ${hr.error}`)
       await reloadConfig()
     },
@@ -139,6 +154,8 @@
   }
   function cancel() {
     abort()
+    selfClosed = true
+    dialog?.close()
     onclose()
   }
   async function stopAll() {
@@ -148,7 +165,19 @@
   const askReady = $derived(view.kind === 'ask' && view.fields.every(f => f.optional || Number(answers[f.name]) > 0))
 </script>
 
-<dialog bind:this={dialog} aria-labelledby="cal-title" oncancel={e => { e.preventDefault(); if (canCancel) cancel() }}>
+<dialog
+  bind:this={dialog}
+  aria-labelledby="cal-title"
+  oncancel={e => { e.preventDefault(); if (canCancel) cancel() }}
+  onclose={() => {
+    if (selfClosed) return // we asked for this; cancel() already did everything else
+    // Closed on its own: a second Escape while busy can bypass our preventDefault (Chromium's close
+    // watcher only honours one prevented cancel without new user activation). While busy, the routine
+    // is still running — reopen so STOP stays the only way out; otherwise treat it like a Cancel.
+    if (view.kind === 'busy') dialog.showModal()
+    else cancel()
+  }}
+>
   <header>
     <strong id="cal-title">{view.title ?? 'Calibrate'}</strong>
     <span class="state">{machine.status.state}</span>
@@ -182,6 +211,12 @@
         {#each view.changes as c, i}
           <label class="change"><input type="checkbox" bind:checked={ticked[i]} /> {c.label}: <span class="mono">{c.old} → {c.new}</span></label>
         {/each}
+        {#if view.lines?.length}
+          <div class="lines">
+            <p class="muted">These lines run next:</p>
+            <pre class="mono">{view.lines.join('\n')}</pre>
+          </div>
+        {/if}
         <button class="go" bind:this={primaryBtn} onclick={next}>Apply, restart and home</button>
       {:else}
         <p>Nothing to change.</p>

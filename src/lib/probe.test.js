@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { probeZ } from './probe.js'
+import { probeZ, probeLines } from './probe.js'
 
 // A fake FluidNC that answers each G38.2 with the next contact height (machine Z), or no contact.
 // After a miss it is in alarm, like FluidNC: G-code is refused (error:9) until $X.
@@ -83,4 +83,12 @@ test('a disconnect mid-probe is reported as refused', async () => {
   const f = fakeFnc([-5])
   f.send = line => Promise.resolve(line.includes('G38.2') ? { ok: false, error: 'disconnected', lines: [] } : { ok: true, error: null, lines: [] })
   await assert.rejects(probeZ(f), /Probe refused: error disconnected/)
+})
+
+test('probeLines lists exactly what probeZ sends, for default and custom options', async () => {
+  assert.deepEqual(probeLines(), ['G91', 'G38.2 Z-20 F300', 'G0 Z1', 'G38.2 Z-2 F25', 'G0 Z1', 'G38.2 Z-2 F25', 'G0 Z1', 'G38.2 Z-2 F25', 'G90'])
+  const opts = { fast: 100, slow: 10, maxDown: 8, backoff: 0.5, touches: 2 }
+  const f = fakeFnc([-5, -5, -5])
+  await probeZ(f, opts)
+  assert.deepEqual(f.sent, probeLines(opts))
 })

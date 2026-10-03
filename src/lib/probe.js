@@ -7,13 +7,25 @@ const prbZ = lines => {
   return m ? Number(m[1].split(',')[2]) : NaN
 }
 
+const probeCmd = (mm, feed) => `G38.2 Z-${+mm.toFixed(3)} F${feed}`
+
+// The exact lines probeZ(fnc, opts) sends, in order — for a caller (the calibration wizard) that wants to
+// show them before probing actually runs. Built from the same DEFAULTS/opts and the same `probeCmd`.
+export function probeLines(opts = {}) {
+  const o = { ...DEFAULTS, ...opts }
+  const lines = ['G91', probeCmd(o.maxDown, o.fast)]
+  for (let i = 0; i < o.touches; i++) lines.push(`G0 Z${+o.backoff.toFixed(3)}`, probeCmd(2 * o.backoff, o.slow))
+  lines.push('G90')
+  return lines
+}
+
 export async function probeZ(fnc, opts = {}) {
   const o = { ...DEFAULTS, ...opts }
   if (!(o.touches >= 1)) throw new Error('touches must be at least 1')
   const quiet = line => fnc.send(line, { quiet: true })
   let missed = false
   const probe = async (mm, feed) => {
-    const r = await fnc.send(`G38.2 Z-${+mm.toFixed(3)} F${feed}`)
+    const r = await fnc.send(probeCmd(mm, feed))
     // A miss prints [PRB:…:0] and ALARM:5 before the reply; FluidNC is then in alarm.
     if (r.lines.some(l => /^\[PRB:[^\]]*:0\]/.test(l) || l.startsWith('ALARM:5'))) {
       missed = true
