@@ -30,3 +30,29 @@ test('remaining time is the raw estimate early on, then scaled by real progress'
   const long = { ...line10, time: Float64Array.from([40, 80]) }
   assert.equal(remaining(long, 0, 80), 80) // running at half the estimated speed
 })
+
+test('a path that revisits a point resolves to the earliest visit not yet passed', () => {
+  // out 0→10, back 10→0, out again 0→10: one line each
+  const job = {
+    pts: Float32Array.from([0, 0, 0, 10, 0, 0, 0, 0, 0, 10, 0, 0]),
+    rapid: new Uint8Array(3),
+    offset: Uint32Array.from([0, 10, 20]),
+    time: Float64Array.from([1, 2, 3]),
+    bytes: 30,
+  }
+  assert.equal(currentSegment(job, 100, [5, 0, 0]), 0)
+  assert.equal(currentSegment(job, 100, [5, 0, 0], 1), 1)
+  assert.equal(currentSegment(job, 100, [5, 0, 0], 2), 2)
+})
+
+test('the tool is never placed more than the planner depth behind the read position', () => {
+  const n = 100 // one-line segments of 10 mm along X; FluidNC has read line 90 but the tool reads as x=5
+  const job = {
+    pts: Float32Array.from({ length: (n + 1) * 3 }, (_, k) => (k % 3 === 0 ? (k / 3) * 10 : 0)),
+    rapid: new Uint8Array(n),
+    offset: Uint32Array.from({ length: n }, (_, i) => i * 10),
+    time: Float64Array.from({ length: n }, (_, i) => i + 1),
+    bytes: n * 10,
+  }
+  assert.ok(currentSegment(job, 90, [5, 0, 0]) >= 89 - 63)
+})
