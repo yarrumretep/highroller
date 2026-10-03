@@ -1329,6 +1329,7 @@ git commit -m "Add the calibration routine: four dots, measurements, one config 
   - **Go to XY0:** rises to the top of Z travel first, then `G0 X0 Y0`.
   - **Raise Z:** `G53 G0 Z<top>`.
   - Each needs the machine Idle and connected; errors show in a line under the buttons.
+  - **Home all / Home X / Home Y / Home Z:** a row of smaller buttons under those three, sending `$H`, `$HX`, `$HY`, `$HZ`. Enabled while connected and Idle *or Alarm* (homing is the way out of the boot alarm); the top bar's alarm banner keeps its own Home button.
 
 - [ ] **Step 1: Edit `src/components/Dro.svelte`**
 
@@ -1379,6 +1380,9 @@ Replace the `<script>` block with:
     await send('G0 X0 Y0')
   })
   const raise = () => run('Raising…', () => send(`G53 G0 Z${top}`))
+  // Homing is allowed in Alarm too: it is how the machine leaves the boot alarm.
+  const canHome = $derived(machine.conn === 'open' && (machine.status.state === 'Idle' || machine.status.state === 'Alarm'))
+  const home = axis => run(`Homing ${axis || 'all'}…`, () => send(axis ? `$H${axis}` : '$H'))
 </script>
 ```
 
@@ -1389,6 +1393,12 @@ After the `{/each}` inside the `.dro` panel, add:
     <button disabled={!idle || !!busy || top == null} onclick={goXY0}>Go to XY0</button>
     <button disabled={!idle || !!busy || top == null} onclick={raise}>Raise Z</button>
   </div>
+  <div class="homes">
+    <button disabled={!canHome || !!busy} onclick={() => home('')}>Home all</button>
+    <button disabled={!canHome || !!busy} onclick={() => home('X')}>Home X</button>
+    <button disabled={!canHome || !!busy} onclick={() => home('Y')}>Home Y</button>
+    <button disabled={!canHome || !!busy} onclick={() => home('Z')}>Home Z</button>
+  </div>
   {#if busy}<p class="note">{busy}</p>{/if}
   {#if !armed && idle && !busy}<p class="note">To probe: plate under the bit, clip on, tap the plate to the bit.</p>{/if}
   {#if error}<p class="note err">{error}</p>{/if}
@@ -1397,6 +1407,8 @@ After the `{/each}` inside the `.dro` panel, add:
 Add to the `<style>`:
 ```css
   .helpers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 4px; }
+  .homes { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 6px; }
+  .homes button { min-height: 44px; padding: 0 6px; font-size: 13px; } /* smaller than the jog buttons, still a finger-sized target */
   .note { margin: 0; font-size: 13px; color: var(--muted); }
   .err { color: var(--bad); }
 ```
@@ -1407,12 +1419,13 @@ Run: `npm run build` (no new warnings). Then with the fake and dev server:
 - Unlock. "Probe Z0" is disabled with the hint shown. `curl -X POST localhost:8081/fake/touch` → the button enables.
 - Press it: the console shows the probe moves; Z work position reads 10.000 at the contact (plate thickness) and the bit lifts 5 mm (work Z 15.000).
 - "Go to XY0" and "Raise Z" move as described.
+- Restart the fake (it boots in Alarm): the Home buttons are enabled while the others are not; "Home X" sends `$HX` (the console shows it, the status goes Home then Idle); "Home all" sends `$H`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add src/components/Dro.svelte
-git commit -m "Add Probe Z0, Go to XY0 and Raise Z to the Jog tab"
+git commit -m "Add Probe Z0, Go to XY0, Raise Z and home buttons to the Jog tab"
 ```
 
 ---
