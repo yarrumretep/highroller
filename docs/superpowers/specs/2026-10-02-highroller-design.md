@@ -87,9 +87,9 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
   - upload: a multipart `POST /upload`, where the field `/<name>S` holds the size and comes before the file;
   - download: `GET /sd/<name>`.
 - **Downloads while the machine moves.** On 4.x, WebDAV answers `/sd/<name>`, so downloads work during a job. On 3.x they are refused while the machine moves.
-- **Dev server.** It proxies `/upload` and `/sd/` to the board or the fake, so the app's relative URLs work the same in development as on the board.
+- **Dev server.** It proxies `/upload`, `/sd/`, `/files` and the flash files the app reads (`/<name>.yaml`, `.json`, `.bak`) to the board or the fake, so the app's relative URLs work the same in development as on the board.
 - **This machine runs FluidNC 3.9.9:** websocket on port 81, and downloads are refused while moving.
-- FluidNC refuses to serve files from flash while the machine is moving. So the app reads the config file and `highroller.json` while idle and keeps them in memory.
+- FluidNC serves a flash file over HTTP at `/<name>` while the machine is idle (or in alarm) and refuses during motion. So the app reads the config file and `highroller.json` that way while idle, on every connection, and keeps them in memory. The text is the file's exact bytes. `$LocalFS/Show` is not used for them: FluidNC broadcasts `[MSG:…]`, `[PRB:…]` and `ALARM:` lines to every client, and they land among its lines; it also truncates lines over 254 characters and drops blank ones.
 - The current job's G-code is cached in the browser (IndexedDB), so a page reload during a cut doesn't have to download the file again.
 
 **Active config file:** found with `$Config/Filename`. It is normally `config.yaml`.
@@ -198,7 +198,7 @@ Because the trail only needs the file and the current progress, it rebuilds itse
 - **Probing:** the touch plate is probed the same way everywhere (the Z0 helper and the wizards):
   1. The bit parks above the spot. The user places the plate, attaches the clip, then touches the plate to the bit and holds it for about a second. The Probe button only becomes available after the status report shows the probe circuit (`Pn:P`) close and open again. This prevents the crash where the clip is off and the bit drives into the plate.
   2. Fast search with `G38.2` at 300 mm/min, going at most 20 mm below the start, then back off 1 mm.
-  3. Three slow touches at 25 mm/min, backing off 1 mm between them. The result is the middle (median) value. If the three readings differ by more than 0.05 mm, the point is rejected and has to be redone.
+  3. Three slow touches at 25 mm/min, backing off 1 mm between them. The result is the middle (median) value, and the touch position (`[PRB:x,y,z:1]`, machine coordinates). If the three readings differ by more than 0.05 mm, the point is rejected and has to be redone: a wizard lifts 5 mm and shows that point's step again with the reason, as often as it fails (STOP still ends it).
   4. If the probe never makes contact, FluidNC raises an alarm. The wizard stops and says why.
 - **Travel height:** at a wizard's first point, the user jogs the bit to about 5–10 mm above the plate. Moves to later points happen at the first touch height + 10 mm.
 
@@ -206,11 +206,12 @@ Because the trail only needs the file and the current progress, it rebuilds itse
 
 Every wizard uses the same steps:
 
-1. Read the active config file (`$Config/Filename`, then `$LocalFS/Show=/<name>` over the websocket, which works on 3.x and 4.x while the machine is idle).
-2. On the first change in a session, upload the unchanged original as `<name>.bak` (multipart `POST /files`, the flash upload FluidNC's own WebUI uses).
-3. Edit the YAML text in place with `yaml-edit.js`, either by setting a value at a key path or by replacing a whole top-level block. The user's comments and layout survive.
-4. Upload the edited file.
-5. Restart FluidNC with `$Bye`, reconnect, and home.
+1. Read the active config file fresh when the wizard starts (`$Config/Filename`, then `GET /<name>` over HTTP while the machine is idle). The text is the file's exact bytes, blank lines and long lines included.
+2. Edit the YAML text in place with `yaml-edit.js`, either by setting a value at a key path or by replacing a whole top-level block. The user's comments and layout survive.
+3. Just before writing, read the file again. If it differs from the text the change was computed from (another device changed it), refuse. Also refuse unless the edited text has the same number of lines and every line that isn't blank or a comment is still a `key:` line.
+4. If `<name>.bak` isn't on the flash yet (`GET /files`), upload the unchanged original as `<name>.bak` (multipart `POST /files`, the flash upload FluidNC's own WebUI uses). An existing `.bak` is kept, so it holds the config from before the first change.
+5. Upload the edited file. If that fails, say that `<name>.bak` holds the original and not to restart the controller.
+6. Restart FluidNC with `$Bye`, reconnect, and home. If homing is refused (a config FluidNC rejects leaves it in an alarm), say to restore `<name>.bak` with the stock WebUI.
 
 A restart only takes a few seconds and every wizard re-homes anyway, so there is no separate path for changing settings live.
 
@@ -218,18 +219,18 @@ A restart only takes a few seconds and every wizard re-homes anyway, so there is
 
 One pass measures Z tilt, squareness and X/Y steps per mm from four V-bit dots on tape, and applies everything with a single config write, restart and home. (Amended 2026-10-03: this replaces the separate squaring and Z-tilt wizards; the corner probes give the tilt for free.)
 
-**Corners.** A = (X-min, Y-min), B = (X-max, Y-min), C = (X-max, Y-max), D = (X-min, Y-max), each `margin` mm (default 50) inside the travel. The travel comes from the config: `max_travel_mm`, `homing/mpos_mm` and `homing/positive_direction` per axis.
+**Corners.** A = (X-min, Y-min), B = (X-max, Y-min), C = (X-max, Y-max), D = (X-min, Y-max), each `margin` mm (default 50) inside the travel. The travel comes from the config: `max_travel_mm`, `homing/mpos_mm` and `homing/positive_direction` per axis (FluidNC's default for a missing `positive_direction` is true).
 
 **The pass.**
-1. **Setup:** fit a V-bit, router off; four pieces of masking tape, the touch plate and clip, calipers or a tape measure. The app homes and moves to corner A at the top of Z; the user jogs the bit down to a few millimetres above where the plate will sit (the jog pad is shown inside the dialog).
-2. **Each corner, A → B → C → D:** stick tape under the bit, put the plate on it, clip on, tap the plate to the bit (which arms the Probe button), probe (the shared routine above), lift the plate, then the dot: `M5`, lift 2 mm, push down to touch − plate thickness − tape thickness at 100 mm/min, retract to the travel height (first touch + 10 mm). Later corners are reached at that height.
-3. **Measure:** diagonals AC and BD for squareness; optionally sides AB and DC (X) and AD and BC (Y) for steps per mm. Measured between dot centres.
-4. **Compute:**
+1. **Setup:** fit a V-bit, router off; four pieces of masking tape, the touch plate and clip, calipers or a tape measure. The app reads the config fresh, homes and moves to corner A at the top of Z; the user jogs the bit down to a few millimetres above where the plate will sit (a Z-only jog pad is shown inside the dialog: an X/Y move there would shift dot A away from the corner).
+2. **Each corner, A → B → C → D:** stick tape under the bit, put the plate on it, clip on, tap the plate to the bit (which arms the Probe button), probe (the shared routine above), lift the plate (Continue stays disabled while the probe input is still closed), then the dot: `M5`, lift 2 mm, push down to touch − plate thickness − tape thickness at 100 mm/min, retract to the travel height (first touch + 10 mm, never above the top of Z). Later corners are reached at that height.
+3. **Measure:** diagonals AC and BD for squareness; optionally sides AB and DC (X) and AD and BC (Y) for steps per mm. Measured between dot centres. An entry more than 1 % or 10 mm (whichever is smaller) away from the length between the probed dots is asked again, with the expected length.
+4. **Compute** (corner positions are where the probe touched, from `[PRB:x,y,z:1]`; the review mentions a corner more than 0.5 mm from where it was sent):
    - Tilt = the average of (zB − zA)/(xB − xA) and (zC − zD)/(xC − xD) from the probe heights (machine Z). Positive means the X-max side is lower. δz = tilt × span.
-   - Skew θ = (AC² − BD²)/(4·W·H); δy = θ × span. Positive means the X-max side sits further along +Y.
-   - steps/mm = current × commanded ÷ the mean of the two measured sides, only when both sides of an axis were entered.
-   - Pull-off: `delta` is how much too far from its switch the X-max side sits. With Z homing to the top, lower means farther, so delta = +δz; with Y homing to Y-min, further +Y means farther, so delta = +δy. The opposite homing direction flips the sign. The X-max motor pulls off delta/2 less and the other delta/2 more, so the origin doesn't move. No pull-off goes below 1 mm: if one would, both are raised so the lower one is exactly 1 mm.
-5. **Review and apply:** every change as old → new with a checkbox, plus the tilt and skew in mm across the gantry. Apply follows "Applying config changes" above.
+   - Skew θ = ((AC² − BD²) − (AC₀² − BD₀²))/(4·W·H), where AC₀ and BD₀ are the diagonals of the probed positions (equal for a true rectangle) and W, H the mean probed side lengths; δy = θ × span. Positive means the X-max side sits further along +Y.
+   - steps/mm = current × commanded ÷ the mean of the two measured sides, only when both sides of an axis were entered; "commanded" is the mean of the two probed side lengths.
+   - Pull-off: `delta` is how much too far from its switch the X-max side sits. With Z homing to the top, lower means farther, so delta = +δz; with Y homing to Y-min, further +Y means farther, so delta = +δy. The opposite homing direction flips the sign. The X-max motor pulls off delta/2 less and the other delta/2 more, so the origin doesn't move. No pull-off goes below 1 mm: if one would, both are raised so the lower one is exactly 1 mm. A pass that would change any pull-off by more than 3 mm is refused, with the numbers it computed and a request to check the measurements.
+5. **Review and apply:** every change as old → new with a checkbox (an axis's two pull-offs share one), plus the tilt and skew in mm across the gantry. Apply follows "Applying config changes" above. The motor-side swap and the last-pass tilt or skew are saved only for an axis whose change was applied.
 6. **Check:** fresh tape on the same spots and run again; the second pass shows what error remains.
 
 **Which motor is on which side.** A setting per axis (Y and Z), not shown in the UI: it defaults to the LowRider layout (motor0 at X-min). If a pass leaves more than 1.2× the previous pass's error in the same direction, the app swaps that setting and says so in the review.
@@ -265,13 +266,13 @@ Settings are stored on the board in `highroller.json` (on the flash), so the pho
 - jog step size and speeds;
 - the last pass's tilt and skew, for the motor-side swap rule.
 
-Settings are read from the board once the config has been read (both need the machine idle) and written back, debounced, after any change. localStorage keeps a copy for the moments before the board has answered.
+Settings are read from the board once the config has been read (both need the machine idle), and again on every connection. The first read after the page loads lets a change made before the board answered win; after a reconnect the board's copy wins outright, so a change made while disconnected is lost. A read that fails for any reason but a missing file writes nothing. Changes are written back, debounced, but only while the machine is Idle or Alarm with no job running (FluidNC handles uploads on the task that feeds the planner); otherwise the write waits until it is idle. localStorage keeps a copy for the moments before the board has answered.
 
 ## Connection
 
 - **Dropped connection:** the app reconnects automatically, waiting a little longer after each failed attempt. A banner reads "Reconnecting, the machine is still running".
 - **On connect or reconnect:**
-  1. Read the machine state, `highroller.json` and the config file.
+  1. Read the machine state, the config file and then `highroller.json` (the board's copy wins after a reconnect). Whether the machine has been homed is unknown again until the next `[MSG:Homed…]`.
   2. If `SD:` shows a job running, load that file and rebuild the preview and trail.
 
 ## Testing

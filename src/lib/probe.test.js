@@ -25,6 +25,7 @@ test('finds the plate fast, backs off, touches three times slowly, and returns t
   const f = fakeFnc([-50.4, -50.012, -50.001, -50.02])
   const r = await probeZ(f)
   assert.equal(r.z, -50.012)
+  assert.deepEqual([r.x, r.y], [10, 20]) // where it touched, from the same [PRB:] report
   assert.deepEqual(r.touches, [-50.012, -50.001, -50.02])
   assert.ok(Math.abs(r.spread - 0.019) < 1e-9)
   assert.deepEqual(f.sent, [
@@ -64,6 +65,14 @@ test('a G90 refusal with no detected miss does not unlock', async () => {
   await probeZ(f, { touches: 1 })
   assert.deepEqual(sent.filter(l => l === '$X'), [])
   assert.equal(sent.at(-1), 'G90')
+})
+
+test('a refused G91 stops before any probe move', async () => {
+  const f = fakeFnc([-5, -5, -5, -5])
+  const real = f.send
+  f.send = line => (line === 'G91' ? (f.sent.push(line), Promise.resolve({ ok: false, error: 9, lines: [] })) : real(line))
+  await assert.rejects(probeZ(f), /G91 refused: error 9/)
+  assert.deepEqual(f.sent, ['G91'])
 })
 
 test('options change the feeds, distances and touch count', async () => {

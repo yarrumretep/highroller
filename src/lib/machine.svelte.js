@@ -19,6 +19,7 @@ export const machine = $state({
   stopping: false,
   wifi: null,
   config: null,
+  homed: false, // a homing cycle has finished since this connection opened and the controller last restarted
 })
 
 function log(line) {
@@ -29,7 +30,7 @@ function log(line) {
 // FluidNC does not read lines from the app while an SD job runs, so the app's own queries wait for idle.
 const whenIdle = []
 const idle = s => s.state === 'Idle' && !s.sd
-function runWhenIdle(fn) {
+export function runWhenIdle(fn) {
   if (!whenIdle.includes(fn)) whenIdle.push(fn) // a reconnect during a long job would otherwise queue it again
   if (idle(machine.status)) flushIdle()
 }
@@ -47,12 +48,14 @@ export const fnc = new FluidNC({
   onStatus: s => {
     machine.status = s
     if (s.state !== 'Alarm') machine.alarm = null
-    if (!machine.config && !loadingConfig && (s.state === 'Idle' || s.state === 'Alarm')) reloadConfig()
+    if (!machine.config && !loadingConfig && (s.state === 'Idle' || s.state === 'Alarm') && Date.now() - configFailedAt > CONFIG_RETRY_MS) reloadConfig().catch(() => {})
     if (idle(s)) flushIdle()
   },
   onLine: line => {
     const m = /^ALARM:(\d+)/.exec(line)
     if (m) machine.alarm = Number(m[1])
+    if (line.startsWith('[MSG:Homed')) machine.homed = true
+    else if (line.startsWith('Grbl ')) machine.homed = false // the restart banner
     if (line !== 'ok') log(line)
   },
   onConnection: c => {
@@ -61,6 +64,10 @@ export const fnc = new FluidNC({
     machine.wifi = null
     if (c === 'open') {
       machine.everOpen = true
+      machine.homed = false
+      // Read the config again (the idle trigger above does it): it may have changed while the link was down.
+      machine.config = null
+      configFailedAt = 0
       fnc.jogCancel() // cancel any jog left running from before the link dropped
       runWhenIdle(readMaxRates)
       runWhenIdle(readWifi)
@@ -90,6 +97,8 @@ async function readWifi() {
 }
 
 let loadingConfig = false
+let configFailedAt = 0
+const CONFIG_RETRY_MS = 10000 // a failed read is retried this often, not on every status report
 
 // Axis travel in machine coordinates, from the config's homing settings.
 function rangesOf(text) {
@@ -98,25 +107,29 @@ function rangesOf(text) {
     const a = axis.toLowerCase()
     const maxTravel = Number(getValue(text, `axes/${a}/max_travel_mm`))
     const mposMm = Number(getValue(text, `axes/${a}/homing/mpos_mm`) ?? 0)
-    const positive = getValue(text, `axes/${a}/homing/positive_direction`) === 'true'
+    const positive = getValue(text, `axes/${a}/homing/positive_direction`) !== 'false' // FluidNC's default is true
     if (!(maxTravel > 0)) return null
     range[axis] = axisRange({ maxTravel, mposMm, positive })
   }
   return range
 }
 
-// The config file is only readable while idle; it is kept until the next reload.
+// The config file is only readable while idle; it is kept until the next reload (or connection).
+// Resolves with machine.config; a failure is logged, then rejects.
 export async function reloadConfig() {
   loadingConfig = true
   try {
     const r = await fnc.send('$Config/Filename', { quiet: true })
     const name = r.lines.find(l => l.startsWith('$Config/Filename='))?.split('=')[1] || 'config.yaml'
-    const text = await readFlash(fnc, name)
-    machine.config = { name, text, range: rangesOf(text) }
+    const text = await readFlash(name)
+    return (machine.config = { name, text, range: rangesOf(text) })
   } catch (e) {
+    configFailedAt = Date.now()
     log(`Config not read: ${e.message}`)
+    throw e
+  } finally {
+    loadingConfig = false
   }
-  loadingConfig = false
 }
 
 export const jogger = createJogger(fnc)

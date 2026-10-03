@@ -9,7 +9,7 @@
   - `probe.js`: the touch-plate probe routine (fast find, back off, three slow touches, median).
   - `yaml-edit.js`: read and change one value in FluidNC's `config.yaml` text, keeping comments and layout.
   - `calib.js`: the calibration maths and the pull-off rules.
-  - `flash.js`: files on the board's flash (read through the websocket, write through HTTP).
+  - `flash.js`: files on the board's flash, read and written over HTTP.
   - `calibration.js`: the calibration routine as an async script that asks the UI for each manual step.
 - **App state:** `settings.svelte.js` becomes board-backed (`highroller.json`); `machine.svelte.js` loads the config file and the axis limits.
 - **UI:** zeroing buttons on the Jog tab; a Tools tab listing the Calibrate routine, which runs in a full-screen dialog with its own STOP; the preview drawn in machine coordinates with the travel outline (user request, 2026-10-03).
@@ -19,6 +19,13 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-02-highroller-design.md`, sections "Calibration" and "Settings" (amended 2026-10-03: one unified routine). This plan is build-order step 3.
 
+**Amended after the final review (2026-10-03).** Where a task's code listing below disagrees, these win (the code in the repo follows them):
+- Files on flash are read over HTTP (`readFlash(name)`: `GET /<name>`, exact bytes; 404 → "no file", otherwise "the board is busy"), not with `$LocalFS/Show`, whose lines other clients' `[MSG:]`/`[PRB:]`/`ALARM:` broadcasts interleave with (and which truncates long lines and drops blank ones). The fake serves `/<name>` (503 while moving) and broadcasts those lines; the dev server proxies `/<name>.yaml|json|bak`.
+- The config and `highroller.json` are read again on every connection; after a reconnect the board's settings win outright. A pass reads the config fresh before "Before you start", and Apply re-reads it and refuses if it changed or if the edit doesn't keep the file's shape.
+- Settings are written only while the machine is Idle or Alarm with no job (otherwise once idle); only a missing file (404) leads to writing the defaults.
+- Corner A's height step has a Z-only jog pad; the maths uses the probe's own x, y (`probeZ` returns `{x, y, z, spread, touches}`); measurements more than 1 % or 10 mm off are asked again; a pull-off change over 3 mm per motor is refused; a failed probe lifts 5 mm and repeats the corner.
+- `<name>.bak` is written only if it isn't on the flash yet (`GET /files`).
+
 ## Global Constraints
 
 - **Language and libraries:** Svelte 5 with runes, Vite, plain JavaScript, no runtime dependencies. Dev dependencies stay as they are.
@@ -27,7 +34,7 @@
 - **Protocol boundary:** only `src/lib/fluidnc.js` touches the websocket. Everything else goes through `fnc.send()`, `fnc.realtime()` and the named helpers.
 - **The machine:** FluidNC 3.9.9. Facts verified in its source:
   - `G38.2` reports `[PRB:x,y,z:1]` in **machine** coordinates, then `ok`. No contact raises `ALARM:5` (and `[PRB:…:0]`).
-  - `$LocalFS/Show=<name>` prints a flash file line by line, raw, then `ok`. It only works while Idle or Alarm.
+  - A flash file is served over HTTP at `/<name>`, byte for byte, while Idle or Alarm; it is refused during motion. (`$LocalFS/Show=<name>` also prints it, but other clients' `[MSG:]`, `[PRB:]` and `ALARM:` broadcasts land among its lines, and it truncates lines over 254 characters and drops blank ones, so the app does not use it.)
   - Flash uploads: multipart `POST /files`, same form as the SD upload (`/<name>S` size field first, then the file part `/<name>`).
   - `$Config/Filename` answers `$Config/Filename=config.yaml`. `$Bye` restarts the board. `$H` homes everything; `$HX`, `$HY`, `$HZ` home one axis.
   - `G4 P0`'s `ok` arrives only after all queued motion has finished.
@@ -35,7 +42,7 @@
 - **Safety:**
   - Every wizard move is a G-code line the user can read on screen before it runs.
   - Probing never starts until the status report has shown the probe input close and open again (`Pn:P`), proving the clip is connected.
-  - Config changes are shown as old → new and need a confirmation; the original is saved as `<name>.bak` first.
+  - Config changes are shown as old → new and need a confirmation; the original is saved as `<name>.bak` first, unless a `.bak` is already on the flash.
   - STOP stays available inside the wizard dialog.
 - **UI:** touch targets ≥ 44 px; phone layout below 900 px (tabs Jog · Job · Tools · More); desktop at ≥ 900 px.
 - **Comments:** short, only where they explain why; `ponytail:` marks deliberate simplifications.
@@ -47,7 +54,7 @@
 | `src/lib/probe.js` (new) | `probeZ(fnc, opts)`: the touch-plate routine, returns the contact height |
 | `src/lib/yaml-edit.js` (new) | `getValue(text, path)`, `setValue(text, path, value)` |
 | `src/lib/calib.js` (new) | `skew()`, `tilt()`, `stepsPerMm()`, `splitPulloff()`, `axisRange()` |
-| `src/lib/flash.js` (new) | `readFlash(fnc, name)`, `writeFlash(name, text)` |
+| `src/lib/flash.js` (new) | `readFlash(name)`, `listFlash()`, `writeFlash(name, text)` |
 | `src/lib/calibration.js` (new) | `calibrate(io)`: the routine as a script of moves, probes, dots and questions |
 | `src/lib/settings.svelte.js` (rewrite) | Board-backed settings with a localStorage fallback |
 | `src/lib/machine.svelte.js` (modify) | `machine.config` (name, text, axis ranges), loaded when idle |
@@ -797,10 +804,10 @@ git commit -m "Fake controller: touch plate and probing, flash files, \$Bye, per
 **Interfaces:**
 - Consumes: `fnc.send(line, { quiet })`, `parseList` from `files.js`, `getValue` (Task 2), `axisRange` (Task 3), the fake's flash endpoints (Task 4).
 - Produces:
-  - `readFlash(fnc, name): Promise<string>`: the file's text (through `$LocalFS/Show`). Throws when FluidNC refuses (not idle, missing file, disconnected).
+  - `readFlash(name, base = ''): Promise<string>`: the file's exact text, over HTTP (`GET /<name>`; amended, see the top). Throws when FluidNC refuses (not idle, missing file: `e.status` 404, unreachable).
   - `writeFlash(name, text, base = ''): Promise<void>`: multipart `POST /files`.
-  - `machine.config`: `{ name, text, range }` once loaded; `range` is `{ X: {min,max}, Y: …, Z: … }` in machine coordinates, or `null` if the config lacks the values. Loaded the first time the machine is Idle or Alarm after a connect; `reloadConfig()` re-reads it.
-  - `settings`: now also holds `plateMm`, `tapeMm`, `spanMm`, `marginMm`, `yMotor0AtXmax`, `zMotor0AtXmax` (and, after a pass, `lastSkewMm`, `lastTiltMm`). Loaded from `highroller.json` on the board when the config loads; saved back (debounced 2 s) after any change once it has been loaded. localStorage keeps a copy for the moments before the board answers.
+  - `machine.config`: `{ name, text, range }` once loaded; `range` is `{ X: {min,max}, Y: …, Z: … }` in machine coordinates, or `null` if the config lacks the values. Loaded the first time the machine is Idle or Alarm after each connect; `reloadConfig()` re-reads it.
+  - `settings`: now also holds `plateMm`, `tapeMm`, `spanMm`, `marginMm`, `yMotor0AtXmax`, `zMotor0AtXmax` (and, after a pass, `lastSkewMm`, `lastTiltMm`). Loaded from `highroller.json` on the board when the config loads (again after every reconnect, when the board's copy wins); saved back (debounced 2 s, and only while the machine is Idle or Alarm with no job) after any change once it has been loaded. localStorage keeps a copy for the moments before the board answers.
 - The dev proxy also forwards `/files` and `/fake/`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1442,7 +1449,7 @@ git commit -m "Add Probe Z0, Go to XY0, Raise Z and home buttons to the Jog tab"
 - Produces:
   - A **Tools** tab (phone) / column section (desktop) with: a Calibrate card and button; a Settings form (plate thickness, tape thickness, gantry span, corner margin, which motor is on the X-max side for Y and for Z).
   - `<Calibrate />`: a full-screen `<dialog>` that runs `calibrate(io)`. Its header has the title and a STOP button; its body shows the current step (text, optional jog pad, optional armed Probe button), question form, review list with checkboxes, progress, or the result. Cancel closes it; STOP calls the app's `stop()` and the routine aborts with "Stopped".
-  - `io.apply(text)` in the dialog: `writeFlash('<name>.bak', oldText)` (first time this session), `writeFlash(name, text)`, `send('$Bye')`, wait until the connection drops and comes back and the machine is Idle or Alarm, `send('$H')`, then `reloadConfig()`.
+  - `io.apply(text, config)` in the dialog (amended): re-read the config and refuse if it changed or the edit lost the file's shape, `writeFlash('<name>.bak', oldText)` (only if no `.bak` is on the flash), `writeFlash(name, text)`, `send('$Bye')`, wait until the connection drops and comes back and the machine is Idle or Alarm, `send('$H')`, then `reloadConfig()`.
 
 - [ ] **Step 1: Write `src/components/Tools.svelte`**
 

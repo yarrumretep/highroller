@@ -53,6 +53,28 @@ test('two clients stay connected at once, like FluidNC 4.x', async () => {
   }
 })
 
+test('messages are broadcast: one client\'s $RI=, and homing, reach the other client', async () => {
+  const server = start(8103)
+  const lines = [[], []]
+  const clients = lines.map(l => new FluidNC({ host: 'localhost:8103', onLine: line => l.push(line) }))
+  try {
+    const opened = clients.map(fnc => new Promise(r => { fnc.onConnection = c => c === 'open' && r() }))
+    for (const fnc of clients) fnc.connect()
+    await Promise.all(opened)
+    await sleep(100) // both clients' own $RI=100 have been answered
+    lines[1].length = 0
+    assert.equal((await clients[0].send('$RI=50', { quiet: true })).ok, true)
+    await sleep(100)
+    assert.deepEqual(lines[1], ['[MSG:INFO: auto report interval set to 50]'])
+    assert.equal((await clients[0].send('$HZ', { quiet: true })).ok, true)
+    await sleep(100)
+    assert.ok(lines[1].includes('[MSG:Homed:Z]'), lines[1].join('|'))
+  } finally {
+    for (const fnc of clients) fnc.close()
+    server.close()
+  }
+})
+
 test('an uploaded file runs with $SD/Run and reports its progress', async () => {
   const server = start(8096)
   const fnc = new FluidNC({ host: 'localhost:8096' })

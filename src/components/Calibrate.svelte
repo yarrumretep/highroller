@@ -1,16 +1,16 @@
 <script module>
-  // Shared across the lifetime of the page, not per dialog instance: a second calibration pass must not
-  // overwrite the original config with the first pass's already-corrected one.
+  // Shared across the lifetime of the page, not per dialog instance: once this page has seen <name>.bak on
+  // the flash (or written it), later passes skip listing the flash for it.
   let backedUp = false
 </script>
 
 <script>
   import { onMount } from 'svelte'
   import { machine, fnc, send as sendLine, stop, reloadConfig } from '../lib/machine.svelte.js'
-  import { settings } from '../lib/settings.svelte.js'
+  import { settings, loadSettings } from '../lib/settings.svelte.js'
   import { probeZ } from '../lib/probe.js'
-  import { writeFlash } from '../lib/flash.js'
-  import { calibrate } from '../lib/calibration.js'
+  import { readFlash, writeFlash, listFlash } from '../lib/flash.js'
+  import { calibrate, badEdit } from '../lib/calibration.js'
   import JogPad from './JogPad.svelte'
 
   let { onclose } = $props()
@@ -45,7 +45,8 @@
   // changes without `view` changing — refocus then, and only then: a pin change elsewhere (the clip
   // can still be on the bit while the measurement form is up) must not steal focus from a field being
   // typed into, and must not turn a checkbox's Space into pressing Apply in the review.
-  $effect(() => { if (view.kind === 'step' && view.arm && armed && !pinClosed) primaryBtn?.focus() })
+  // The same goes for a "make the dot" step, whose Continue waits for the plate to come off the bit.
+  $effect(() => { if (view.kind === 'step' && !pinClosed && ((view.arm && armed) || view.plateOff)) primaryBtn?.focus() })
 
   const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -54,7 +55,12 @@
 
   const io = {
     settings,
-    get config() { return machine.config },
+    async readConfig() {
+      throwIfStopped()
+      const config = await reloadConfig()
+      throwIfStopped()
+      return config
+    },
     async send(line) {
       throwIfStopped()
       const r = await sendLine(line)
@@ -63,17 +69,22 @@
     },
     async probe() {
       throwIfStopped()
-      const r = await probeZ(fnc)
-      throwIfStopped()
-      return r
+      try {
+        return await probeZ(fnc)
+      } finally {
+        throwIfStopped() // a STOP while probing fails the probe too; report the STOP, not the probe
+      }
     },
     busy: text => (view = { kind: 'busy', text }),
     step: s => new Promise((res, rej) => { seenClosed = false; armed = false; resolve = res; reject = rej; view = { kind: 'step', ...s } }),
-    ask: q => new Promise((res, rej) => { answers = {}; resolve = res; reject = rej; view = { kind: 'ask', ...q } }),
+    ask: q => new Promise((res, rej) => {
+      answers = Object.fromEntries(Object.entries(q.values ?? {}).filter(([, v]) => v != null)) // asked again: keep what was typed
+      resolve = res; reject = rej; view = { kind: 'ask', ...q }
+    }),
     review: r => new Promise((res, rej) => { ticked = r.changes.map(() => true); resolve = res; reject = rej; view = { kind: 'review', ...r } }),
-    async apply(text) {
+    // The second argument is the config the pass was computed from.
+    async apply(text, { name, text: old }) {
       throwIfStopped()
-      const { name, text: old } = machine.config
       // Once `written`, the new config is on flash even if the routine stops here. `restarting` is
       // set just before $Bye goes out — while it's in flight we can't tell whether the board already
       // has it, so that case gets its own, admittedly-uncertain message. `restarted` means the result
@@ -86,11 +97,24 @@
         if (!restarted) throw new Error(`Stopped while the restart was being sent; the new ${name} is on flash and loads at the next restart; ${name}.bak holds the old one.`)
         throw new Error(`Stopped. The board is restarting with the new ${name} and has not been homed; ${name}.bak holds the old one.`)
       }
-      // ponytail: the .bak is read back over the websocket ($LocalFS/Show), which drops blank lines; it is
-      // line-exact otherwise, which is all a backup needs to be.
-      if (!backedUp) { await writeFlash(`${name}.bak`, old); backedUp = true }
+      // The file must still be the one this pass was computed from (another device may have changed it), and the
+      // edit must still look like the config. Both texts are the file's exact bytes, read over HTTP.
+      const current = await readFlash(name)
       checkStopped()
-      await writeFlash(name, text)
+      if (current !== old) throw new Error('The config changed since this pass started, so nothing was written. Run the pass again.')
+      const bad = badEdit(old, text)
+      if (bad) throw new Error(`The edited config doesn't look right (${bad}), so nothing was written.`)
+      // One backup, of the config as it was before the first calibration: an existing .bak is kept.
+      if (!backedUp) {
+        if (!(await listFlash()).some(f => f.name === `${name}.bak`)) await writeFlash(`${name}.bak`, old)
+        backedUp = true
+      }
+      checkStopped()
+      try {
+        await writeFlash(name, text)
+      } catch (e) {
+        throw new Error(`${e.message}. Don't restart the controller: ${name} on its flash may be incomplete. ${name}.bak holds the original; put it back as ${name} with the stock WebUI.`)
+      }
       written = true
       machine.config = null // the file on flash no longer matches what's loaded; stays unknown until the restart reloads it
       checkStopped()
@@ -121,8 +145,11 @@
       view = { kind: 'busy', text: 'Homing…' }
       const hr = await sendLine('$H')
       checkStopped()
-      if (!hr.ok) throw new Error(`$H failed: ${hr.error}`)
-      await reloadConfig()
+      // A config FluidNC rejects leaves it in ConfigAlarm, which reports as Alarm and refuses $H.
+      if (!hr.ok) throw new Error(`$H failed: ${hr.error}. If the controller is in alarm it may have rejected the new ${name}: restore ${name}.bak as ${name} with the stock WebUI, then restart it.`)
+      await reloadConfig().catch(() => {}) // logged; the idle trigger tries again
+      // The settings are read again after the restart; the pass's own numbers go in only once that is done.
+      if (!(await loadSettings())) throw new Error(`Applied and homed, but highroller.json could not be read back, so this pass's numbers were not saved.`)
     },
   }
 
@@ -198,7 +225,8 @@
       {#if sentLines.length}<pre class="mono lines">{sentLines.join('\n')}</pre>{/if}
     {:else if view.kind === 'step'}
       <p>{view.text}</p>
-      {#if view.jog}<JogPad />{/if}
+      {#if view.error}<p class="err">{view.error}</p>{/if}
+      {#if view.jog}<JogPad zOnly={view.jog === 'z'} />{/if}
       {#if view.lines?.length}
         <div class="lines">
           <p class="muted">These lines run next:</p>
@@ -206,9 +234,11 @@
         </div>
       {/if}
       {#if view.arm && !armed}<p class="muted">Waiting for the plate to touch the bit…</p>{/if}
-      <button class="go" bind:this={primaryBtn} disabled={view.arm && (!armed || pinClosed)} onclick={next}>{view.arm ? 'Probe' : 'Continue'}</button>
+      {#if view.plateOff && pinClosed}<p class="muted">The plate is still touching the bit.</p>{/if}
+      <button class="go" bind:this={primaryBtn} disabled={(view.arm && !armed) || ((view.arm || view.plateOff) && pinClosed)} onclick={next}>{view.arm ? 'Probe' : 'Continue'}</button>
     {:else if view.kind === 'ask'}
       <p>{view.text}</p>
+      {#if view.error}<p class="err">{view.error}</p>{/if}
       {#each view.fields as f}
         <label>{f.label}{f.optional ? ' (optional)' : ''} <input type="number" step="0.01" inputmode="decimal" bind:value={answers[f.name]} /> {f.unit}</label>
       {/each}
@@ -217,7 +247,7 @@
       {#each view.notes as n}<p>{n}</p>{/each}
       {#if view.changes.length}
         {#each view.changes as c, i}
-          <label class="change"><input type="checkbox" bind:checked={ticked[i]} /> {c.label}: <span class="mono">{c.old} → {c.new}</span></label>
+          <label class="change"><input type="checkbox" bind:checked={ticked[i]} /> {c.label}: <span class="mono">{c.edits.map(e => `${e.label ? e.label + ' ' : ''}${e.old} → ${e.new}`).join(', ')}</span></label>
         {/each}
         {#if view.lines?.length}
           <div class="lines">

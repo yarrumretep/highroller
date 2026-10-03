@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => {
   const target = `http://${env.VITE_FLUIDNC_HOST || 'localhost:8081'}`
   return {
     plugins: [svelte(), viteSingleFile()],
-    server: { proxy: { '/upload': target, '/sd/': target, '/files': target, '/fake/': target } },
+    // a key starting with ^ is a regex: flash files the app reads at /<name> (config, settings, the backup)
+    server: { proxy: { '/upload': target, '/sd/': target, '/files': target, '/fake/': target, '^/[^/]+\\.(yaml|json|bak)$': target } },
   }
 })

@@ -1,4 +1,4 @@
-import { machine, fnc } from './machine.svelte.js'
+import { machine, runWhenIdle } from './machine.svelte.js'
 import { readFlash, writeFlash } from './flash.js'
 
 // Settings live on the board (highroller.json on its flash) so phone and desktop share them.
@@ -6,6 +6,7 @@ import { readFlash, writeFlash } from './flash.js'
 const FILE = 'highroller.json'
 const KEY = 'highroller.settings'
 const SAVE_DELAY_MS = 2000
+const RETRY_MS = 10000 // a read the board refused (busy) is tried again after this, once idle
 const DEFAULTS = {
   step: 10,
   feedXY: 3000,
@@ -27,49 +28,74 @@ function local() {
 }
 
 export const settings = $state({ ...DEFAULTS, ...local() })
-const initialJson = JSON.stringify(settings) // settings as the page started; a change from this before the board answers wins over its copy
-let onBoard = false // true once the board's copy has been read or deferred to; only then are changes written back
+const initialJson = JSON.stringify(settings) // settings as the page started; a change from this before the board first answers wins over its copy
+let synced = false // the board's copy has been read (or found missing) since the page loaded
+let onBoard = false // the board's copy has been read on this connection; only then are changes written back
 let boardJson = null // JSON last read from or written to the board; a change that still matches it needs no write back
 let saveTimer
+let loading = null
 
-async function loadFromBoard() {
-  try {
-    const text = await readFlash(fnc, FILE)
-    const json = JSON.stringify(settings) // settings right now, before deciding what to do with the board's copy
-    if (json === initialJson) {
-      Object.assign(settings, JSON.parse(text))
-      boardJson = JSON.stringify(settings)
-    } else {
-      // a setting changed while this was loading: that change wins over the board's copy, so push ours instead of overwriting it
-      await saveSettings()
-      boardJson = json
-    }
-  } catch {
-    // ponytail: no file yet (first run), unreadable, or the push failed; keep what we have and write it on the next change
-  }
-  onBoard = true
-  maybeSave(JSON.stringify(settings)) // a change during the read or the push above doesn't retrigger the effect on its own
+// Reads the board's copy, once per connection; resolves true once it has been read (or found missing).
+// After a reconnect the board's copy wins outright, so another device's changes (or a calibration pass's) are kept.
+// ponytail: a change made while disconnected, or still waiting to be written when the link dropped, is lost.
+export function loadSettings() {
+  if (onBoard) return Promise.resolve(true)
+  return (loading ??= loadFromBoard().finally(() => { loading = null }))
 }
 
-export const saveSettings = () => writeFlash(FILE, JSON.stringify(settings, null, 2) + '\n')
+async function loadFromBoard() {
+  let board = null
+  try {
+    board = JSON.parse(await readFlash(FILE))
+  } catch (e) {
+    if (e.status !== 404) {
+      // busy, unreachable or unreadable: nothing is written over a copy that couldn't be read
+      console.warn('Settings not read:', e.message)
+      if (e.status) setTimeout(() => runWhenIdle(retry), RETRY_MS) // the board answered but refused: it was busy
+      return false
+    }
+    // no file yet (first run): ours are written below
+  }
+  if (machine.conn !== 'open') return false // the link dropped meanwhile; the next connection reads it again
+  if (board && (synced || JSON.stringify(settings) === initialJson)) {
+    Object.assign(settings, board)
+    boardJson = JSON.stringify(settings)
+  } else {
+    boardJson = null // no file yet, or a setting changed before the board first answered: ours are written back
+  }
+  synced = onBoard = true
+  maybeSave(JSON.stringify(settings)) // a change during the read doesn't retrigger the effect on its own
+  return true
+}
+
+const retry = () => { if (machine.config && !onBoard) loadSettings() }
+
+const saveSettings = () => writeFlash(FILE, JSON.stringify(settings, null, 2) + '\n')
 
 // Debounces a write-back once json has moved on from the board's last known copy.
 function maybeSave(json) {
   clearTimeout(saveTimer) // a change reverted before the timer fires needs no write back either
   if (!onBoard || json === boardJson) return
-  saveTimer = setTimeout(() => {
-    // ponytail: a failed write is not retried on its own; it goes out again only if another setting changes afterward.
-    saveSettings()
-      .then(() => { boardJson = json })
-      .catch(e => console.warn('Settings not saved:', e.message))
-  }, SAVE_DELAY_MS)
+  saveTimer = setTimeout(writeBack, SAVE_DELAY_MS)
+}
+
+// Writes only while nothing runs (FluidNC handles uploads on the task that feeds the planner); otherwise once idle.
+function writeBack() {
+  const json = JSON.stringify(settings)
+  if (!onBoard || json === boardJson) return // the link dropped (the board's copy is read again), or nothing to write
+  const s = machine.status
+  if (!(s.state === 'Idle' || s.state === 'Alarm') || s.sd) return runWhenIdle(writeBack)
+  // ponytail: a failed write is not retried on its own; it goes out again only if another setting changes afterward.
+  saveSettings()
+    .then(() => { boardJson = json })
+    .catch(e => console.warn('Settings not saved:', e.message))
 }
 
 $effect.root(() => {
-  // Read the board's copy once the config has loaded (both need the machine idle).
-  $effect(() => {
-    if (machine.config && !onBoard) loadFromBoard()
-  })
+  // Off the board while the link is down: the next connection reads the board's copy before anything is written.
+  $effect(() => { if (machine.conn !== 'open') onBoard = false })
+  // Read the board's copy once the config has loaded (both need the machine idle); the config is read on every connection.
+  $effect(() => { if (machine.config && !onBoard) loadSettings() })
   $effect(() => {
     const json = JSON.stringify(settings)
     try { localStorage.setItem(KEY, json) } catch {}

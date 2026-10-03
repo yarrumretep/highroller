@@ -2,6 +2,7 @@
 // binary output frames, status reports, jogging, G0/G1 moves, work offsets, overrides, alarms,
 // SD files over HTTP (/upload, /sd/<name>) and running them with $SD/Run, the way 3.9.9 does:
 // lines from clients wait while a job's file is being read, and SD: goes once the file has been read.
+// Flash files are served at /<name> while Idle or Alarm; [MSG:], [PRB:] and ALARM: lines go to every client.
 // ponytail: grows only as features need it; job arcs run as straight lines, G20 and M2/M30 are ignored.
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -198,7 +199,7 @@ export function start(port = 8081) {
     if (home) {
       m.state = 'Home'
       status()
-      setTimeout(() => { m.mpos[AXES.indexOf(home[1])] = 0; m.state = 'Idle'; status(); ok() }, HOME_MS)
+      setTimeout(() => { m.mpos[AXES.indexOf(home[1])] = 0; m.state = 'Idle'; status(); broadcast(`[MSG:Homed:${home[1]}]`); ok() }, HOME_MS)
       return
     }
     const run = /^\s*\$SD\/RUN=\/?(.+?)\s*$/i.exec(text) // file names keep their case
@@ -219,7 +220,13 @@ export function start(port = 8081) {
       reply(`Signal: ${Math.round(wifi)}%`)
       return ok()
     }
-    if (l.startsWith('$RI=')) { ri = Number(l.slice(4)); wcoIn = ovIn = 0; status(ws); return ok() } // a full report follows $RI
+    if (l.startsWith('$RI=')) { // a full report follows $RI
+      ri = Number(l.slice(4))
+      wcoIn = ovIn = 0
+      status(ws)
+      broadcast(`[MSG:INFO: auto report interval set to ${ri}]`)
+      return ok()
+    }
     if (l === '$X') { // unlocks only an alarm; otherwise just ok, as FluidNC does
       if (m.state === 'Alarm') { m.state = 'Idle'; status(); reply('[MSG:INFO: Caution: Unlocked]') }
       return ok()
@@ -227,7 +234,7 @@ export function start(port = 8081) {
     if (l === '$H') {
       m.state = 'Home'
       status()
-      setTimeout(() => { m.mpos = [0, 0, 0]; m.state = 'Idle'; status(); ok() }, HOME_MS)
+      setTimeout(() => { m.mpos = [0, 0, 0]; m.state = 'Idle'; status(); broadcast('[MSG:Homed:XYZ]'); ok() }, HOME_MS)
       return
     }
     const q = /^\$\/AXES\/([XYZ])\/MAX_RATE_MM_PER_MIN$/.exec(l)
@@ -419,6 +426,13 @@ export function start(port = 8081) {
     if (file) {
       res.writeHead(200, { 'Content-Type': 'text/plain' })
       return res.end(file)
+    }
+    const onFlash = /^\/([^/]+)$/.exec(url.pathname)
+    if (onFlash && req.method === 'GET') { // a flash file, refused during motion as FluidNC does
+      if (!['Idle', 'Alarm'].includes(m.state)) { res.writeHead(503); return res.end('Busy') }
+      const buf = flash.get(decodeURIComponent(onFlash[1]))
+      res.writeHead(buf ? 200 : 404, { 'Content-Type': 'text/plain' })
+      return res.end(buf ?? 'Not found')
     }
     res.writeHead(404)
     res.end()

@@ -1,10 +1,10 @@
 // The touch-plate routine: find the plate fast, back off, then touch slowly a few times and take the median.
-// Heights are machine coordinates, straight from FluidNC's [PRB:x,y,z:1] report.
+// Positions are machine coordinates, straight from FluidNC's [PRB:x,y,z:1] report.
 const DEFAULTS = { fast: 300, slow: 25, maxDown: 20, backoff: 1, touches: 3, tolerance: 0.05 }
 
-const prbZ = lines => {
+const prb = lines => {
   const m = lines.map(l => /^\[PRB:([^:\]]+):1\]/.exec(l)).find(Boolean)
-  return m ? Number(m[1].split(',')[2]) : NaN
+  return m ? m[1].split(',').map(Number) : []
 }
 
 const probeCmd = (mm, feed) => `G38.2 Z-${+mm.toFixed(3)} F${feed}`
@@ -24,6 +24,7 @@ export async function probeZ(fnc, opts = {}) {
   if (!(o.touches >= 1)) throw new Error('touches must be at least 1')
   const quiet = line => fnc.send(line, { quiet: true })
   let missed = false
+  let at // x, y of the last touch
   const probe = async (mm, feed) => {
     const r = await fnc.send(probeCmd(mm, feed))
     // A miss prints [PRB:…:0] and ALARM:5 before the reply; FluidNC is then in alarm.
@@ -32,11 +33,13 @@ export async function probeZ(fnc, opts = {}) {
       throw new Error('No contact: is the plate under the bit and the clip attached?')
     }
     if (!r.ok) throw new Error(`Probe refused: error ${r.error}`)
-    const z = prbZ(r.lines)
-    if (Number.isNaN(z)) throw new Error('Probe refused: no [PRB:] report')
+    const [x, y, z] = prb(r.lines)
+    if (![x, y, z].every(Number.isFinite)) throw new Error('Probe refused: no [PRB:] report')
+    at = { x, y }
     return z
   }
-  await quiet('G91')
+  const g91 = await quiet('G91')
+  if (!g91.ok) throw new Error(`G91 refused: error ${g91.error}`) // in absolute mode G38.2 Z-20 would head for work Z -20
   try {
     await probe(o.maxDown, o.fast)
     const touches = []
@@ -49,7 +52,7 @@ export async function probeZ(fnc, opts = {}) {
     if (spread > o.tolerance) throw new Error(`Touches differ by ${spread.toFixed(3)} mm. Clean the plate and try again.`)
     const n = sorted.length
     const z = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
-    return { z, spread, touches }
+    return { ...at, z, spread, touches }
   } finally {
     // After a miss FluidNC is in alarm ("position may be lost") and refuses G-code until unlocked.
     // A G90 refused for some other reason does not mean an alarm that $X should clear.

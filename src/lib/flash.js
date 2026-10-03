@@ -1,13 +1,22 @@
 import { parseList } from './files.js'
 
-// Files on the board's flash. Reading goes through the websocket ($LocalFS/Show prints the file, on 3.x and
-// 4.x alike, while the machine is idle or in alarm); writing uses the /files upload that FluidNC's own WebUI uses.
+// Files on the board's flash, over HTTP. FluidNC serves a flash file at /<name> while the machine is idle or
+// in alarm (it refuses during motion), byte for byte; writing uses the /files upload that its own WebUI uses.
+// $LocalFS/Show is not used: other clients' [MSG:]/[PRB:]/ALARM: broadcasts land among its lines, and it
+// truncates long lines and drops blank ones.
 
-// ponytail: a file line that is exactly "ok" or starts with "error:" would end the reply early; the YAML/JSON configs read here never contain one.
-export async function readFlash(fnc, name) {
-  const r = await fnc.send(`$LocalFS/Show=/${name}`, { quiet: true })
-  if (!r.ok) throw new Error(`Can't read ${name} (${r.error === 'disconnected' ? 'not connected' : `error ${r.error}`})`)
-  return r.lines.length ? r.lines.join('\n') + '\n' : ''
+// The exact text of the file. A failure carries the HTTP status (404: no such file).
+export async function readFlash(name, base = '') {
+  const r = await fetch(`${base}/${encodeURIComponent(name)}`, { cache: 'no-store' }).catch(() => { throw new Error(`Can't read ${name}: network error`) })
+  if (!r.ok) throw Object.assign(new Error(`Can't read ${name}: ${r.status === 404 ? 'no file' : `the board is busy (HTTP ${r.status})`}`), { status: r.status })
+  // fatal: a file that isn't UTF-8 would not survive being written back; ignoreBOM: keep a BOM if there is one
+  return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await r.arrayBuffer())
+}
+
+export async function listFlash(base = '') {
+  const r = await fetch(base + '/files?path=/', { cache: 'no-store' }).catch(() => { throw new Error("Can't list the flash: network error") })
+  if (!r.ok) throw new Error(`Can't list the flash: HTTP ${r.status}`)
+  return parseList(await r.json())
 }
 
 export async function writeFlash(name, text, base = '') {
