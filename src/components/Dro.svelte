@@ -64,7 +64,7 @@
   {/each}
   <div class="helpers">
     <!-- Enabled before the plate has touched: pressing it then shows the hint (a disabled button cannot be tapped for help) -->
-    <button disabled={!idle || !!busy} onclick={() => (armed ? probe() : (hint = true))} title={HINT}>Probe Z0</button>
+    <button class:go={armed} disabled={!idle || !!busy} onclick={() => (armed ? probe() : (hint = true))} title={HINT}>Probe Z0</button>
     <button disabled={!idle || !!busy || top == null} onclick={goXY0}>Go to XY0</button>
     <button disabled={!idle || !!busy || top == null} onclick={raise}>Raise Z</button>
   </div>
