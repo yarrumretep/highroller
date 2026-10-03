@@ -52,7 +52,7 @@
 
   // Double-click a number to type a destination for that axis: Enter or Go moves there, Escape cancels.
   let edit = $state(null) // { i, machineCoords, value }
-  const focus = el => el.focus()
+  const focus = el => { el.focus(); el.select() }
   function startEdit(i, machineCoords) {
     if (!idle || busy) return
     const pos = machineCoords ? machine.status.mpos : machine.status.wpos
@@ -60,6 +60,8 @@
     edit = { i, machineCoords, value: pos[i].toFixed(3) }
   }
   function go() {
+    if (!edit) return
+    if (edit.value == null || edit.value === '') return // emptied: Number(null) is 0, not "no destination"
     const v = Number(edit.value)
     if (!Number.isFinite(v)) return
     const line = `${edit.machineCoords ? 'G53 ' : ''}G0 ${AXES[edit.i]}${v}`
@@ -127,5 +129,5 @@
   .plain:active { background: var(--btn-active); }
   .editor { display: flex; gap: 6px; align-items: center; }
   .editor input { flex: 1; min-width: 0; min-height: 44px; padding: 0 8px; font-size: 22px; border: 1px solid var(--accent); border-radius: 10px; background: var(--bg); }
-  .editor .go { color: white; background: var(--ok); border-color: var(--ok); }
+  .go { color: white; background: var(--ok); border-color: var(--ok); }
 </style>
