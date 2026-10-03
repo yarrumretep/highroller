@@ -43,6 +43,33 @@ test('two clients stay connected at once, like FluidNC 4.x', async () => {
   }
 })
 
+test('an uploaded file runs with $SD/Run and reports its progress', async () => {
+  const server = start(8096)
+  const fnc = new FluidNC({ host: 'localhost:8096' })
+  try {
+    const form = new FormData()
+    form.append('/job.ncS', '26')
+    form.append('myfile', new Blob(['G21 G90\nG0 X5\nG1 X10 F600\n']), '/job.nc')
+    assert.equal((await fetch('http://localhost:8096/upload', { method: 'POST', body: form })).status, 200)
+    const opened = new Promise(r => { fnc.onConnection = c => c === 'open' && r() })
+    fnc.connect()
+    await opened
+    assert.equal((await fnc.send('$X')).ok, true)
+    const seen = []
+    fnc.onStatus = s => s.sd && seen.push(s.sd)
+    assert.equal((await fnc.send('$SD/Run=/job.nc')).ok, true)
+    await sleep(1500)
+    assert.ok(seen.length > 0)
+    assert.equal(seen[0].file, '/sd/job.nc')
+    assert.equal(fnc.status.state, 'Idle')
+    assert.equal(fnc.status.sd, null)
+    assert.ok(Math.abs(fnc.status.mpos[0] - 10) < 1e-6, `x=${fnc.status.mpos[0]}`)
+  } finally {
+    fnc.close()
+    server.close()
+  }
+})
+
 test('feed override bytes change the reported override', async () => {
   const server = start(8098)
   const fnc = new FluidNC({ host: 'localhost:8098' })
