@@ -26,16 +26,18 @@ function findLine(lines, path) {
 const scalar = line => /:(.*)$/.exec(line)[1].replace(/\s+#.*$/, '').trim()
 
 export function getValue(text, path) {
-  const lines = text.split('\n')
-  const i = findLine(lines, path)
-  return i < 0 ? undefined : scalar(lines[i])
+  const eol = text.includes('\r\n') ? '\r\n' : '\n' // keep the file's own line endings
+  const i = findLine(text.split(eol), path)
+  return i < 0 ? undefined : scalar(text.split(eol)[i])
 }
 
 export function setValue(text, path, value) {
-  const lines = text.split('\n')
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(eol)
   const i = findLine(lines, path)
   if (i < 0) throw new Error(`${path} not found in config`)
-  const m = /^([^:]*:)(\s*)([^#]*?)(\s*#.*)?$/.exec(lines[i])
-  lines[i] = `${m[1]}${m[2] || ' '}${value}${m[4] ?? ''}`
-  return lines.join('\n')
+  // key, the space after it, the value, then either a comment (with its leading whitespace) or trailing whitespace
+  const m = /^([^:]*:)(\s*)(.*?)(\s+#.*|\s*)$/.exec(lines[i])
+  lines[i] = `${m[1]}${m[2] || ' '}${value}${m[4]}`
+  return lines.join(eol)
 }

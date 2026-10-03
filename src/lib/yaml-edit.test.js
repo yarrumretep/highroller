@@ -60,3 +60,18 @@ test('the same key under different parents is told apart', () => {
   assert.equal(getValue(out, 'axes/z/motor0/pulloff_mm'), '3.5')
   assert.equal(getValue(out, 'axes/y/motor0/pulloff_mm'), '4.000')
 })
+
+test('CRLF line endings are read and kept', () => {
+  const crlf = CONFIG.replace(/\n/g, '\r\n')
+  assert.equal(getValue(crlf, 'axes/y/motor1/pulloff_mm'), '4.000')
+  const out = setValue(crlf, 'axes/y/motor1/pulloff_mm', '4.350')
+  assert.equal(getValue(out, 'axes/y/motor1/pulloff_mm'), '4.350')
+  assert.ok(!/[^\r]\n/.test(out), 'no bare LF introduced')
+  assert.equal(out.split('\r\n').length, crlf.split('\r\n').length)
+})
+
+test('trailing whitespace on the edited line survives, and a # inside a value is not a comment', () => {
+  assert.equal(setValue('a: 1   \nb: 2\n', 'a', '9'), 'a: 9   \nb: 2\n')
+  assert.equal(getValue('tag: ABC#123\n', 'tag'), 'ABC#123')
+  assert.equal(setValue('tag: ABC#123\n', 'tag', 'X'), 'tag: X\n')
+})
