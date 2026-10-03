@@ -69,7 +69,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 - The app turns on auto-reporting with `$RI=100`, which gives 10 reports a second.
 - FluidNC only auto-reports while the machine moves or when something changes. So whenever nothing has arrived for 250 ms, the app sends `?`.
 - If nothing at all arrives for 3 s, the app treats the link as dead and reconnects. That also covers a phone waking from sleep.
-- Fields parsed: `State` (including `Hold:0`/`Hold:1`), `MPos` or `WPos` (depending on FluidNC's `$10` setting), `WCO`, `FS`, `Ov`, `Pn`, `A`, `SD`.
+- Fields parsed: `State` (including `Hold:0`/`Hold:1`), `SD` (`<percent>,<path>` while running; `<name>: Sent` once the whole file has been read), `MPos` or `WPos` (depending on FluidNC's `$10` setting), `WCO`, `FS`, `Ov`, `Pn`, `A`.
 - `WCO` (work offset) and `Ov` (overrides) only appear in some reports, so their last values are cached. `A` (spindle and coolant state) only appears alongside `Ov`.
 - Work position: WPos = MPos − WCO. If the report gives WPos instead, MPos = WPos + WCO.
 
@@ -80,11 +80,14 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 **HTTP**
 - SD card: list, upload (with a progress bar), download, delete.
 - Flash: read and upload, used for the config file, `highroller.json` and app updates.
-- Endpoints by version:
-  - FluidNC 4.x: WebDAV at `/sd/…` and `/flash/…`, using GET, PUT, DELETE and PROPFIND.
-  - FluidNC 3.x: the older `/upload` (SD card) and `/files` (flash) endpoints.
-
-  Which one to build depends on the board's firmware version (see "Verify on hardware").
+- **One file API for both versions.** FluidNC 3.x and 4.x both serve the same endpoints, so the app uses one implementation (checked in source; 4.x adds WebDAV alongside but keeps these):
+  - list: `GET /upload?path=/`, which returns JSON (`files: [{name, size}]`, with size −1 for a folder);
+  - delete: `GET /upload?path=/&action=delete&filename=<name>`;
+  - upload: a multipart `POST /upload`, where the field `/<name>S` holds the size and comes before the file;
+  - download: `GET /sd/<name>`.
+- **Downloads while the machine moves.** On 4.x, WebDAV answers `/sd/<name>`, so downloads work during a job. On 3.x they are refused while the machine moves.
+- **Dev server.** It proxies `/upload` and `/sd/` to the board or the fake, so the app's relative URLs work the same in development as on the board.
+- **This machine runs FluidNC 3.9.9:** websocket on port 81, and downloads are refused while moving.
 - FluidNC refuses to serve files from flash while the machine is moving. So the app reads the config file and `highroller.json` while idle and keeps them in memory.
 - The current job's G-code is cached in the browser (IndexedDB), so a page reload during a cut doesn't have to download the file again.
 
@@ -139,6 +142,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
   4. Offer the Raise Z button.
 
   STOP is software. A physical e-stop is still recommended.
+- **STOP during a job aborts the job** (hold, then reset). A feed hold alone would leave the router spinning. The Job tab has separate Pause and Resume buttons.
 - **Remaining time:**
   1. Estimate each remaining segment's time from the G-code: length ÷ feed rate, with rapids at the axes' maximum rate from the config.
   2. Scale that estimate by how fast the job is really going: actual elapsed time ÷ estimated elapsed time so far.
@@ -176,7 +180,7 @@ Because the trail only needs the file and the current progress, it rebuilds itse
 ## Overrides
 
 - **Feed:** slider, 10–200%.
-- **Spindle:** slider, 10–200%. Hidden when the spindle is a simple on/off relay.
+- **Spindle:** slider, 10–200%. Hidden when the spindle is a simple on/off relay. Until step 4 reads the config, it is shown for every spindle.
 - **Rapid:** buttons for 25 / 50 / 100%.
 - **How a slider works:** FluidNC only accepts override changes in steps of ±10% or ±1%. A slider works out the sequence of steps from the current `Ov:` value to the target, sends them, then shows the value FluidNC reports.
 
@@ -314,7 +318,7 @@ Settled by reading FluidNC's source (versions 3.9.9 and 4.1.1):
 - **Dust collector wiring:** an on/off spindle's `enable_pin` follows M3/M5.
 
 Still open:
-1. **The board's firmware version.** Run `$Build/Info` to find it. This decides which file endpoints the app uses.
+1. **The board's firmware version:** FluidNC 3.9.9 (from the user). The file endpoints above work on both 3.x and 4.x.
 2. **Spare output pins on the Jackpot.** Take them from V1 Engineering's pinout, then check the user's `config.yaml`.
 3. **A smoke test on the real machine:** connect, read position, jog, STOP.
 
