@@ -3,8 +3,9 @@
 
   let dialog
   $effect(() => {
-    if (pending.req) dialog.showModal()
-    else if (dialog?.open) dialog.close()
+    if (pending.req) {
+      if (!dialog.open) dialog.showModal()
+    } else if (dialog?.open) dialog.close()
   })
 </script>
 

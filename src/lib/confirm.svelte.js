@@ -2,6 +2,7 @@
 export const pending = $state({ req: null })
 
 export function confirm({ title, text = '', ok = 'OK', danger = false }) {
+  pending.req?.resolve(false) // a newer question replaces an unanswered one
   return new Promise(resolve => {
     pending.req = { title, text, ok, danger, resolve }
   })
