@@ -124,7 +124,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 
 **Job tab:** list of files on the SD card, upload, preview, Run / Pause / Resume / Stop, progress, elapsed and remaining time, and overrides.
 
-**Tools tab:** the Square & scale, Z tilt and Outputs wizards.
+**Tools tab:** the Calibrate routine, the Outputs wizard, and the settings form.
 
 **More tab**
 - **Console:** send raw commands and see the output.
@@ -203,58 +203,35 @@ Because the trail only needs the file and the current progress, it rebuilds itse
 
 Every wizard uses the same steps:
 
-1. Download the active config file.
-2. On the first change in a session, upload the unchanged original as `<name>.bak`.
+1. Read the active config file (`$Config/Filename`, then `$LocalFS/Show=/<name>` over the websocket, which works on 3.x and 4.x while the machine is idle).
+2. On the first change in a session, upload the unchanged original as `<name>.bak` (multipart `POST /files`, the flash upload FluidNC's own WebUI uses).
 3. Edit the YAML text in place with `yaml-edit.js`, either by setting a value at a key path or by replacing a whole top-level block. The user's comments and layout survive.
 4. Upload the edited file.
 5. Restart FluidNC with `$Bye`, reconnect, and home.
 
 A restart only takes a few seconds and every wizard re-homes anyway, so there is no separate path for changing settings live.
 
-### Square & scale (dots on tape)
+### Calibrate (one routine)
 
-One run measures both squareness and X/Y steps/mm.
+One pass measures Z tilt, squareness and X/Y steps per mm from four V-bit dots on tape, and applies everything with a single config write, restart and home. (Amended 2026-10-03: this replaces the separate squaring and Z-tilt wizards; the corner probes give the tilt for free.)
 
-**Making the dots**
-1. Four corners of a W × H rectangle in machine coordinates. By default it is as large as the travel allows, minus 50 mm at each edge.
-   - A: X-min, Y-min
-   - B: X-max, Y-min
-   - C: X-max, Y-max
-   - D: X-min, Y-max
-2. The user fits a V-bit. At each corner the wizard asks them to stick a piece of tape under the bit.
-3. At each corner:
-   1. Probe with the plate sitting on the tape. The tape's top surface = touch height − plate thickness.
-   2. The user removes the plate.
-   3. Make sure the spindle is off: the wizard sends `M5`, or asks the user to switch off a router that's turned on by hand.
-   4. Push the V-bit down to (tape surface − tape thickness), then lift. This leaves a dot in the tape.
+**Corners.** A = (X-min, Y-min), B = (X-max, Y-min), C = (X-max, Y-max), D = (X-min, Y-max), each `margin` mm (default 50) inside the travel. The travel comes from the config: `max_travel_mm`, `homing/mpos_mm` and `homing/positive_direction` per axis.
 
-**Measuring:** the user measures whichever of these they want and enters them.
-- **Diagonals AC and BD → squaring.**
-  - Skew angle: θ = (AC² − BD²) / (4·W·H).
-  - Correction: Δ = θ · S, where S is the gantry span, a setting.
-  - Applied as ±Δ/2 to the `pulloff_mm` of the two Y motors.
-- **Sides AB and DC (for X) and AD and BC (for Y) → steps/mm.**
-  - New steps/mm = current steps/mm × commanded distance ÷ the average of the two measured sides.
-  - Skew doesn't change side lengths, so both calibrations come from one set of dots.
+**The pass.**
+1. **Setup:** fit a V-bit, router off; four pieces of masking tape, the touch plate and clip, calipers or a tape measure. The app homes and moves to corner A at the top of Z; the user jogs the bit down to a few millimetres above where the plate will sit (the jog pad is shown inside the dialog).
+2. **Each corner, A → B → C → D:** stick tape under the bit, put the plate on it, clip on, tap the plate to the bit (which arms the Probe button), probe (the shared routine above), lift the plate, then the dot: `M5`, lift 2 mm, push down to touch − plate thickness − tape thickness at 100 mm/min, retract to the travel height (first touch + 10 mm). Later corners are reached at that height.
+3. **Measure:** diagonals AC and BD for squareness; optionally sides AB and DC (X) and AD and BC (Y) for steps per mm. Measured between dot centres.
+4. **Compute:**
+   - Tilt = the average of (zB − zA)/(xB − xA) and (zC − zD)/(xC − xD) from the probe heights (machine Z). Positive means the X-max side is lower. δz = tilt × span.
+   - Skew θ = (AC² − BD²)/(4·W·H); δy = θ × span. Positive means the X-max side sits further along +Y.
+   - steps/mm = current × commanded ÷ the mean of the two measured sides, only when both sides of an axis were entered.
+   - Pull-off: `delta` is how much too far from its switch the X-max side sits. With Z homing to the top, lower means farther, so delta = +δz; with Y homing to Y-min, further +Y means farther, so delta = +δy. The opposite homing direction flips the sign. The X-max motor pulls off delta/2 less and the other delta/2 more, so the origin doesn't move. No pull-off goes below 1 mm: if one would, both are raised so the lower one is exactly 1 mm.
+5. **Review and apply:** every change as old → new with a checkbox, plus the tilt and skew in mm across the gantry. Apply follows "Applying config changes" above.
+6. **Check:** fresh tape on the same spots and run again; the second pass shows what error remains.
 
-**Repeating:** put fresh tape on the same spots and run it again to check.
+**Which motor is on which side.** A setting per axis (Y and Z): whether motor0 is on the X-max side. If a pass leaves more than 1.2× the previous pass's error in the same direction, the app swaps that setting and says so in the review.
 
-**Tape thickness:** a setting, 0.1 mm by default. Increase it if the dots are hard to see.
-
-### Z tilt
-
-1. At the current Y, probe near X-min, which gives a touch height z₁ at position x₁. Then probe near X-max, which gives z₂ at x₂. The wizard prompts the user to move the plate between the two.
-2. Correction: Δ = (z₂ − z₁) / (x₂ − x₁) · S. Applied as ±Δ/2 to the `pulloff_mm` of the two Z motors.
-3. Restart, home, and probe both points again. Show what error is left. Repeat until |z₂ − z₁| is 0.05 mm or less; the tolerance is a setting.
-
-Notes:
-- The plate's thickness doesn't matter here, because only the difference between the two touches is used.
-- Probe a flat surface that this machine did not surface. A spoilboard the machine surfaced itself already follows the gantry's tilt, so it reads close to zero. Calibrate Z tilt before surfacing, and resurface after any change.
-
-### Pull-off rules (both squaring and Z tilt)
-
-- **Which motor is on which side:** whether motor0 or motor1 is on the left is a setting, one per axis. If an adjustment makes the next measurement worse, the app concludes the setting is backwards, flips it, and works from the new measurement.
-- **Minimum pull-off:** a pull-off never goes below 1 mm. If an adjustment would push one below that, both motors are raised so the lower one sits at exactly 1 mm.
+**Caveat shown in the routine:** tilt is measured against the surface the tape sits on. If this machine already surfaced the spoilboard, that surface follows the old tilt and the reading comes out near zero; for a true reading put the tape on something the machine didn't cut, such as a straight bar laid across.
 
 ### Outputs
 
@@ -277,12 +254,15 @@ Z steps/mm isn't calibrated: the LowRider's Z is driven by a leadscrew, so its s
 ## Settings
 
 Settings are stored on the board in `highroller.json` (on the flash), so the phone and the desktop share them:
-- gantry span S;
+- gantry span (between the two Y motors);
 - touch-plate thickness;
 - tape thickness;
-- which motor is on which side, for Y and for Z;
-- jog step sizes and speeds;
-- Z-tilt tolerance.
+- corner margin inside the travel;
+- which motor is on the X-max side, for Y and for Z;
+- jog step size and speeds;
+- the last pass's tilt and skew, for the motor-side swap rule.
+
+Settings are read from the board once the config has been read (both need the machine idle) and written back, debounced, after any change. localStorage keeps a copy for the moments before the board has answered.
 
 ## Connection
 
@@ -328,6 +308,5 @@ Each step is usable on its own:
 
 1. Protocol, position readout, jogging, console. Plus the fake server and the hardware checks above.
 2. Files, Job tab, preview and tracking, overrides.
-3. Probe routine and the zeroing helpers.
-4. Config editing, Square & scale, Z tilt.
-5. Outputs. Then switch over to `index.html.gz`.
+3. Probe routine, zeroing helpers, settings on the board, config editing, and the Calibrate routine.
+4. Outputs. Then switch over to `index.html.gz`.
