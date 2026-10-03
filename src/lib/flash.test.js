@@ -14,6 +14,8 @@ test('writes a flash file over HTTP and reads it back over the websocket', async
     await writeFlash('highroller.json', '{"plateMm":10}\n', 'http://localhost:8090')
     assert.equal(await readFlash(fnc, 'highroller.json'), '{"plateMm":10}\n')
     await assert.rejects(readFlash(fnc, 'nope.txt'), /nope.txt/)
+    await writeFlash('empty.txt', '', 'http://localhost:8090')
+    assert.equal(await readFlash(fnc, 'empty.txt'), '')
   } finally {
     fnc.close()
     server.close()
