@@ -29,7 +29,7 @@
     <JogPad />
   </section>
   <section class:off={tab !== 'job'}>
-    <Preview job={job.data} current={job.current} pos={machine.status.wpos} />
+    <Preview job={job.data} current={job.current} mpos={machine.status.mpos} wpos={machine.status.wpos} wco={machine.status.wco} range={machine.config?.range ?? null} />
     <Job />
     <Overrides />
   </section>

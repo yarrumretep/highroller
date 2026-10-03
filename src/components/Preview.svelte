@@ -1,8 +1,9 @@
 <script>
   import { onMount } from 'svelte'
 
-  // job: parsed G-code or null; current: index of the segment being cut (-1 = none); pos: live work position (null = not known yet)
-  let { job = null, current = -1, pos = [0, 0, 0] } = $props()
+  // Drawn in machine coordinates: the file's work coordinates shifted by the work offset `wco`, the tool at
+  // `mpos`. `wpos` supplies the work Z for the red/green rule; `range` is the X/Y travel, if known.
+  let { job = null, current = -1, mpos = [0, 0, 0], wpos = [0, 0, 0], wco = [0, 0, 0], range = null } = $props()
 
   let box, base, trail, dot
   let size = { w: 0, h: 0, dpr: 1 }
@@ -13,6 +14,8 @@
 
   const sx = x => view.ox + x * view.scale
   const sy = y => view.oy - y * view.scale
+  const jx = x => sx(x + wco[0]) // a job (work) coordinate on screen
+  const jy = y => sy(y + wco[1])
 
   function ctxOf(canvas) {
     const ctx = canvas.getContext('2d')
@@ -23,14 +26,21 @@
   function drawBase() {
     const ctx = ctxOf(base)
     ctx.clearRect(0, 0, size.w, size.h)
-    if (!job) return
+    if (range) { // the machine's reach
+      ctx.setLineDash([6, 4])
+      ctx.strokeStyle = colors.path
+      ctx.lineWidth = 1
+      ctx.strokeRect(sx(range.X.min), sy(range.Y.max), (range.X.max - range.X.min) * view.scale, (range.Y.max - range.Y.min) * view.scale)
+      ctx.setLineDash([])
+    }
+    if (!job || !wco) return // the job is drawn shifted by the work offset, which may not be known yet
     const { pts: p, rapid } = job
     for (const r of [1, 0]) {
       ctx.beginPath()
       for (let i = 0; i < rapid.length; i++) {
         if (rapid[i] !== r) continue
-        ctx.moveTo(sx(p[i * 3]), sy(p[i * 3 + 1]))
-        ctx.lineTo(sx(p[i * 3 + 3]), sy(p[i * 3 + 4]))
+        ctx.moveTo(jx(p[i * 3]), jy(p[i * 3 + 1]))
+        ctx.lineTo(jx(p[i * 3 + 3]), jy(p[i * 3 + 4]))
       }
       ctx.strokeStyle = r ? colors.rapid : colors.path
       ctx.lineWidth = r ? 0.5 : 1
@@ -43,13 +53,13 @@
     const ctx = ctxOf(trail)
     if (from < 0) ctx.clearRect(0, 0, size.w, size.h)
     drawnTo = current
-    if (!job || current <= 0) return
+    if (!job || current <= 0 || !wco) return
     const p = job.pts
     ctx.beginPath()
     for (let i = Math.max(from, 0); i < current; i++) {
       if (p[i * 3 + 2] >= 0 && p[i * 3 + 5] >= 0) continue
-      ctx.moveTo(sx(p[i * 3]), sy(p[i * 3 + 1]))
-      ctx.lineTo(sx(p[i * 3 + 3]), sy(p[i * 3 + 4]))
+      ctx.moveTo(jx(p[i * 3]), jy(p[i * 3 + 1]))
+      ctx.lineTo(jx(p[i * 3 + 3]), jy(p[i * 3 + 4]))
     }
     ctx.strokeStyle = colors.cut
     ctx.lineWidth = 2
@@ -60,13 +70,13 @@
   function drawDot() {
     const ctx = ctxOf(dot)
     ctx.clearRect(0, 0, size.w, size.h)
-    if (!pos) return // no tool to draw until the work offset is known
-    const below = pos[2] < 0
-    const x = sx(pos[0]), y = sy(pos[1])
-    if (job && current >= 0 && below) {
+    if (!mpos) return // no tool to draw until the machine position is known
+    const below = wpos?.[2] < 0
+    const x = sx(mpos[0]), y = sy(mpos[1])
+    if (job && wco && current >= 0 && below) {
       const p = job.pts
       ctx.beginPath()
-      ctx.moveTo(sx(p[current * 3]), sy(p[current * 3 + 1]))
+      ctx.moveTo(jx(p[current * 3]), jy(p[current * 3 + 1]))
       ctx.lineTo(x, y)
       ctx.strokeStyle = colors.cut
       ctx.lineWidth = 2
@@ -92,19 +102,39 @@
     })
   }
 
+  // Fit the travel rectangle, or the job (a double-tap toggles). Falls back to whichever exists, then to 100 mm.
+  let fitMode = 'table'
   function fit() {
-    const b = job && job.bounds.minX <= job.bounds.maxX ? job.bounds : { minX: 0, minY: 0, maxX: 100, maxY: 100 }
+    const jb = job && wco && job.bounds.minX <= job.bounds.maxX
+      ? { minX: job.bounds.minX + wco[0], maxX: job.bounds.maxX + wco[0], minY: job.bounds.minY + wco[1], maxY: job.bounds.maxY + wco[1] }
+      : null
+    const tb = range ? { minX: range.X.min, maxX: range.X.max, minY: range.Y.min, maxY: range.Y.max } : null
+    const b = (fitMode === 'table' ? tb ?? jb : jb ?? tb) ?? { minX: 0, minY: 0, maxX: 100, maxY: 100 }
     const w = Math.max(b.maxX - b.minX, 1), h = Math.max(b.maxY - b.minY, 1)
     view.scale = 0.9 * Math.min(size.w / w, size.h / h)
     view.ox = size.w / 2 - ((b.minX + b.maxX) / 2) * view.scale
     view.oy = size.h / 2 + ((b.minY + b.maxY) / 2) * view.scale
     redraw()
   }
+  function toggleFit() {
+    fitMode = fitMode === 'table' ? 'job' : 'table'
+    fit()
+  }
 
-  // A new file: fit it to the view.
+  // A new file or a newly known travel: refit.
   $effect(() => {
     job
+    range
     if (size.w) fit()
+  })
+  // A changed work offset moves the drawn toolpath (only when the values really changed: the array is renewed often).
+  let drawnWco = null
+  $effect(() => {
+    const w = wco ? wco.join(',') : null
+    if (size.w && w !== drawnWco) {
+      drawnWco = w
+      redraw()
+    }
   })
   // Progress: add newly finished segments to the trail (or start over if it went backwards).
   $effect(() => {
@@ -112,7 +142,8 @@
     if (size.w && !raf) drawTrail(current < drawnTo ? -1 : drawnTo)
   })
   $effect(() => {
-    pos
+    mpos
+    wpos
     current
     if (size.w && !raf) drawDot()
   })
@@ -178,11 +209,11 @@
 </script>
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="panel preview" aria-label="Toolpath preview" bind:this={box} {onpointerdown} {onpointermove} {onpointerup} onpointercancel={onpointerup} ondblclick={fit}>
+  <div class="panel preview" aria-label="Toolpath preview" bind:this={box} {onpointerdown} {onpointermove} {onpointerup} onpointercancel={onpointerup} ondblclick={toggleFit}>
   <canvas bind:this={base}></canvas>
   <canvas bind:this={trail}></canvas>
   <canvas bind:this={dot}></canvas>
-  {#if !job}<p class="hint">Load a file to preview it here</p>{/if}
+  {#if !job}<p class="hint">{range ? 'Load a file to see it on the table' : 'Load a file to preview it here'}</p>{/if}
 </div>
 
 <style>
