@@ -117,10 +117,12 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 - Every time the websocket connects, the app sends a jog cancel, so a jog left over from before a dropped link never continues.
 - If the connection drops, the machine therefore stops within a fraction of a second instead of running to the end of travel.
 - Zeroing buttons:
-  - Probe Z0 with the touch plate.
+  - Probe Z0 with the touch plate (its hint is a tooltip; the button turns green once the plate has touched, and a press before that shows the hint in a fixed note line so nothing shifts).
   - Zero X/Y here.
   - Zero Z here.
-  - Go to XY0.
+  - Go to XY0 (first raising to work Z 10 if the bit is lower, not to the top of travel).
+  - Home all, Home X, Home Y, Home Z: smaller buttons, enabled in Idle or Alarm.
+  - Double-click a coordinate to type a destination for that axis (work or machine).
   - Raise Z (to the top of travel).
 
 **Job tab:** list of files on the SD card, upload, preview, Run / Pause / Resume / Stop, progress, elapsed and remaining time, and overrides.
@@ -230,7 +232,7 @@ One pass measures Z tilt, squareness and X/Y steps per mm from four V-bit dots o
 5. **Review and apply:** every change as old → new with a checkbox, plus the tilt and skew in mm across the gantry. Apply follows "Applying config changes" above.
 6. **Check:** fresh tape on the same spots and run again; the second pass shows what error remains.
 
-**Which motor is on which side.** A setting per axis (Y and Z): whether motor0 is on the X-max side. If a pass leaves more than 1.2× the previous pass's error in the same direction, the app swaps that setting and says so in the review.
+**Which motor is on which side.** A setting per axis (Y and Z), not shown in the UI: it defaults to the LowRider layout (motor0 at X-min). If a pass leaves more than 1.2× the previous pass's error in the same direction, the app swaps that setting and says so in the review.
 
 **Caveat shown in the routine:** tilt is measured against the surface the tape sits on. If this machine already surfaced the spoilboard, that surface follows the old tilt and the reading comes out near zero; for a true reading put the tape on something the machine didn't cut, such as a straight bar laid across.
 
@@ -255,11 +257,11 @@ Z steps/mm isn't calibrated: the LowRider's Z is driven by a leadscrew, so its s
 ## Settings
 
 Settings are stored on the board in `highroller.json` (on the flash), so the phone and the desktop share them:
-- gantry span (between the two Y motors);
-- touch-plate thickness;
+- gantry span (between the two Y motors; 0, the default, means the X travel from the config);
+- touch-plate thickness (default 0.5 mm, V1 Engineering's plate);
 - tape thickness;
 - corner margin inside the travel;
-- which motor is on the X-max side, for Y and for Z;
+- which motor is on the X-max side, for Y and for Z (stored, not shown; the swap rule maintains it);
 - jog step size and speeds;
 - the last pass's tilt and skew, for the motor-side swap rule.
 
