@@ -17,6 +17,17 @@
   // Mounted at the top level, not inside the Tools tab section: a layout change to the phone breakpoint
   // mid-run must not hide the dialog behind a `display: none` tab while the page stays inert.
   let calibrating = $state(false)
+
+  // Tap-to-go is a machine-coordinate move: raise clear of the stock first, same rule as Dro's Go to XY0.
+  async function goTo(x, y) {
+    const wpos = machine.status.wpos
+    if (!wpos) return { ok: false, error: 'Position not known yet.' }
+    if (wpos[2] < 10) {
+      const r = await send('G0 Z10') // clear the stock (work Z0 is its top) before crossing to the new XY
+      if (!r.ok) return r
+    }
+    return send(`G53 G0 X${Math.round(x * 1000) / 1000} Y${Math.round(y * 1000) / 1000}`)
+  }
 </script>
 
 <TopBar />
@@ -36,8 +47,8 @@
       wpos={machine.status.wpos}
       wco={machine.status.wco}
       range={machine.config?.range ?? null}
-      canGo={machine.conn === 'open' && machine.status.state === 'Idle' && !job.running}
-      onGo={(x, y) => send(`G53 G0 X${Math.round(x * 1000) / 1000} Y${Math.round(y * 1000) / 1000}`)}
+      canGo={machine.conn === 'open' && machine.status.state === 'Idle' && !job.running && machine.homed}
+      onGo={goTo}
     />
     <Job />
     <Overrides />

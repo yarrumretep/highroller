@@ -17,7 +17,8 @@
     const p = machine.status.pins.includes('P')
     if (p) seenClosed = true
     else if (seenClosed) { armed = true; hint = false }
-    if (machine.conn !== 'open') { seenClosed = false; armed = false }
+    // Arming must not survive a jog or a move: only a fresh closed→open cycle while Idle counts.
+    if (machine.conn !== 'open' || machine.status.state !== 'Idle') { seenClosed = false; armed = false }
   })
 
   // send() never throws on a refusal; the helpers need to surface that as an error.
@@ -61,12 +62,18 @@
   }
   function go() {
     if (!edit) return
-    if (edit.value == null || edit.value === '') return // emptied: Number(null) is 0, not "no destination"
-    const v = Number(edit.value)
-    if (!Number.isFinite(v)) return
-    const line = `${edit.machineCoords ? 'G53 ' : ''}G0 ${AXES[edit.i]}${v}`
+    const { i, machineCoords, value } = edit
+    if (value == null || value === '') { error = 'Enter a destination.'; return } // emptied: Number(null) is 0, not "no destination"
+    const v = Number(value)
+    if (!Number.isFinite(v)) { error = 'Not a number.'; return }
+    const wco = machine.status.wco
+    if (!machineCoords && !wco) { error = 'Position not known yet.'; return }
+    const m = machineCoords ? v : v + wco[i] // the machine editor's value is already a machine coordinate
+    const range = machine.config?.range?.[AXES[i]]
+    if (range && (m < range.min || m > range.max)) { error = `${AXES[i]} travel is ${range.min.toFixed(3)} to ${range.max.toFixed(3)}.`; return }
+    if (!machine.homed) { error = 'Home the machine first.'; return }
     edit = null
-    run('Moving…', () => cmd(line))
+    run('Moving…', () => cmd(`G53 G0 ${AXES[i]}${Math.round(m * 1000) / 1000}`))
   }
   function editKey(e) {
     if (e.key === 'Enter') go()
@@ -78,7 +85,10 @@
   }
   // Homing is allowed in Alarm too: it is how the machine leaves the boot alarm.
   const canHome = $derived(machine.conn === 'open' && (machine.status.state === 'Idle' || machine.status.state === 'Alarm'))
-  const home = axis => run(`Homing ${axis || 'all'}…`, () => cmd(axis ? `$H${axis}` : '$H'))
+  const home = axis => run(`Homing ${axis || 'all'}…`, async () => {
+    if (axis === 'X' || axis === 'Y') await cmd('$HZ') // home Z alone first so a lowered bit isn't dragged across the work
+    await cmd(axis ? `$H${axis}` : '$H')
+  })
 </script>
 
 <div class="panel dro">
@@ -87,7 +97,7 @@
       <span class="axis">{axis}</span>
       {#if edit?.i === i}
         <span class="editor">
-          <input class="mono" type="number" step="0.001" inputmode="decimal" bind:value={edit.value} onkeydown={editKey} onblur={editBlur} use:focus />
+          <input class="mono" type="number" step="0.001" bind:value={edit.value} onkeydown={editKey} onblur={editBlur} use:focus />
           <button class="go" onclick={go}>Go</button>
         </span>
         <span class="mach">{edit.machineCoords ? 'machine' : 'work'}</span>
@@ -101,7 +111,7 @@
   <div class="helpers">
     <!-- Enabled before the plate has touched: pressing it then shows the hint (a disabled button cannot be tapped for help) -->
     <button class:go={armed} disabled={!idle || !!busy} onclick={() => (armed ? probe() : (hint = true))} title={HINT}>Probe Z0</button>
-    <button disabled={!idle || !!busy || top == null} onclick={goXY0}>Go to XY0</button>
+    <button disabled={!idle || !!busy || top == null || !machine.status.wpos} onclick={goXY0}>Go to XY0</button>
     <button disabled={!idle || !!busy || top == null} onclick={raise}>Raise Z</button>
   </div>
   <div class="homes">

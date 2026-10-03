@@ -19,6 +19,7 @@
   const mx = px => (px - view.ox) / view.scale // screen → machine
   const my = py => (view.oy - py) / view.scale
   let target = $state(null) // { x, y } machine coordinates of the tapped spot
+  let goError = $state('') // why onGo refused, shown once the attempt comes back
   const TAP_PX = 8 // a press that moves less than this is a tap
 
   function ctxOf(canvas) {
@@ -205,6 +206,8 @@
   function onpointerup(e) {
     const p = pointers.get(e.pointerId)
     pointers.delete(e.pointerId)
+    // `!p` is load-bearing: the Go button's own pointerdown stops propagation, so a press that started on it
+    // never registered here, and this guard is what keeps that click from also being read as a tap on the canvas.
     if (press?.id !== e.pointerId || !p) return
     const [x0, y0] = press.at
     press = null
@@ -225,11 +228,15 @@
     const x = mx(px), y = my(py)
     if (x < range.X.min || x > range.X.max || y < range.Y.min || y > range.Y.max) return // outside the reach
     target = { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 }
+    goError = ''
   }
-  function goToTarget() {
+  async function goToTarget() {
+    if (!target) return // canGo can flip false between pointerdown and click
     const t = target
     target = null
-    onGo?.(t.x, t.y)
+    goError = ''
+    const r = await onGo?.(t.x, t.y)
+    if (r && !r.ok) goError = r.error
   }
   function onwheel(e) {
     e.preventDefault()
@@ -261,13 +268,14 @@
 </script>
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="panel preview" aria-label="Toolpath preview" bind:this={box} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} ondblclick={toggleFit}>
+  <div class="panel preview" aria-label="Toolpath preview" bind:this={box} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} ondblclick={() => { target = null; toggleFit() }}>
   <canvas bind:this={base}></canvas>
   <canvas bind:this={trail}></canvas>
   <canvas bind:this={dot}></canvas>
   {#if target && canGo}
-    <button class="goto" onpointerdown={e => e.stopPropagation()} onclick={goToTarget}>Go to X {target.x.toFixed(1)} Y {target.y.toFixed(1)}</button>
+    <button class="goto" onpointerdown={e => e.stopPropagation()} onpointerup={e => e.stopPropagation()} onclick={goToTarget}>Go to X {target.x.toFixed(1)} Y {target.y.toFixed(1)}</button>
   {/if}
+  {#if goError}<p class="goerr">{goError}</p>{/if}
   {#if !job}<p class="hint">{range ? 'Load a file to see it on the table' : 'Load a file to preview it here'}</p>{/if}
 </div>
 
@@ -275,6 +283,7 @@
   .preview { position: relative; height: 50vh; min-height: 260px; padding: 0; overflow: hidden; touch-action: none; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   .hint { position: absolute; inset: auto 0 12px; margin: 0; text-align: center; font-size: 14px; color: var(--muted); pointer-events: none; }
+  .goerr { position: absolute; inset: auto 0 12px; margin: 0; text-align: center; font-size: 14px; font-weight: 600; color: var(--bad); pointer-events: none; }
   .goto { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); min-height: 48px; padding: 0 18px; font-weight: 700; color: white; background: var(--accent); border-color: var(--accent); }
   @media (min-width: 900px) { .preview { height: 60vh; } }
 </style>

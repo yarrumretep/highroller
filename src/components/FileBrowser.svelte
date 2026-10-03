@@ -94,7 +94,7 @@
 </dialog>
 
 <style>
-  dialog { width: min(100vw, 560px); max-width: 100vw; height: 100vh; max-height: 100vh; margin: 0 auto; padding: 0; border: 0; display: grid; grid-template-rows: auto 1fr auto; color: var(--text); background: var(--bg); }
+  dialog { width: min(100vw, 560px); max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0 auto; padding: 0; border: 0; display: grid; grid-template-rows: auto 1fr auto; color: var(--text); background: var(--bg); }
   dialog:not([open]) { display: none; }
   dialog::backdrop { background: rgb(0 0 0 / 0.5); }
   header, footer { display: flex; gap: 8px; align-items: center; padding: 10px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
