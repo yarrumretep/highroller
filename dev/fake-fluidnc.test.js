@@ -124,16 +124,21 @@ test('feed override bytes change the reported override', async () => {
   server.close()
 })
 
-test('$System/Stats reports a Wi-Fi signal percentage', async () => {
+test('$System/Stats=json=yes reports a Wi-Fi signal percentage in [MSG:JSON:…] chunks; the plain form has none', async () => {
   const server = start(8094)
   const fnc = new FluidNC({ host: 'localhost:8094' })
+  const seen = []
+  fnc.onLine = l => seen.push(l)
   try {
     const opened = new Promise(r => { fnc.onConnection = c => c === 'open' && r() })
     fnc.connect()
     await opened
-    const r = await fnc.send('$System/Stats', { quiet: true })
+    const r = await fnc.send('$System/Stats=json=yes', { quiet: true })
+    assert.ok(r.lines.length >= 2 && r.lines.every(l => l.startsWith('[MSG:JSON:')), r.lines.join('|'))
     const pct = wifiPercent(r.lines)
     assert.ok(pct >= 55 && pct <= 85, `signal=${pct}`)
+    assert.ok(!seen.some(l => l.startsWith('[MSG:JSON:')), 'the quiet query\'s JSON stays out of the console')
+    assert.equal(wifiPercent((await fnc.send('$System/Stats', { quiet: true })).lines), null)
   } finally {
     fnc.close()
     server.close()

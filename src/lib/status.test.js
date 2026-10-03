@@ -91,7 +91,12 @@ test('overrides are unknown until a report carries Ov', () => {
   assert.deepEqual(parseStatus('<Run|MPos:0,0,0|FS:0,0>', b).ov, [110, 100, 100])
 })
 
-test('wifiPercent reads the Signal line of $System/Stats, or null without one', () => {
-  assert.equal(wifiPercent(['Current WiFi Mode: STA', 'Signal: 78%', 'Hostname: fluidnc']), 78)
-  assert.equal(wifiPercent(['Current WiFi Mode: AP']), null)
+test('wifiPercent reads the Signal entry of the JSON stats, split across [MSG:JSON:…] chunks', () => {
+  const json = '{"cmd":"420","status":"ok","data":[{"id":"Chip ID","value":"36942"},{"id":"Signal","value":"78%"},{"id":"FW version","value":"FluidNC v3.9.9"}]}'
+  const chunks = [`[MSG:JSON:${json.slice(0, 70)}]`, `[MSG:JSON:${json.slice(70)}]`] // the cut lands inside the Signal entry
+  assert.equal(wifiPercent(chunks), 78)
+  assert.equal(wifiPercent(['[MSG:JSON:{"cmd":"420","status":"ok","data":[{"id":"Current WiFi Mode","value":"AP"}]}]']), null)
+  // the plain 3.9.9 output has no signal; an older plain "Signal:" line still reads
+  assert.equal(wifiPercent(['Chip ID: 36942', '[MSG:Mode=STA:SSID=shop:Status=Connected:IP=1.2.3.4:MAC=00]', 'FW version: FluidNC v3.9.9']), null)
+  assert.equal(wifiPercent(['Current WiFi Mode: STA', 'Signal: 78%']), 78)
 })

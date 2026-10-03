@@ -136,7 +136,7 @@ export class FluidNC {
       return
     }
     const c = this.inflight
-    if (!c?.quiet || /^(ALARM:|\[MSG:|Grbl )/.test(line)) this.onLine(line)
+    if (!c?.quiet || /^(ALARM:|\[MSG:(?!JSON:)|Grbl )/.test(line)) this.onLine(line) // [MSG:JSON:…] is a quiet query's own answer
     // A restart from elsewhere (another client, the reset pin, $Bye) prints this banner and never
     // answers what was in flight. Our own reset() already fails the queue before the banner arrives,
     // so this only fires when something else restarted the controller.

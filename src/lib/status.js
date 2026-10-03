@@ -57,9 +57,13 @@ export function parseStatus(line, prev = EMPTY) {
   return s
 }
 
-// Wi-Fi signal as the controller sees it, from $System/Stats ("Signal: 78%" as a station; no such line as an access point).
+// Wi-Fi signal as the controller sees it. Only the JSON form of the stats carries it on 3.9.9
+// ($System/Stats=json=yes answers in [MSG:JSON:…] chunks of up to 100 characters, split anywhere,
+// holding {"id":"Signal","value":"78%"} as a station and nothing of the kind as an access point).
+// The plain "Signal: 78%" line is kept for firmware that prints one.
 export function wifiPercent(lines) {
-  const m = lines.map(l => /^Signal:\s*(\d+)%/.exec(l)).find(Boolean)
+  const json = lines.map(l => /^\[MSG:JSON:(.*)\]$/.exec(l)?.[1]).filter(Boolean).join('')
+  const m = /"id"\s*:\s*"Signal"\s*,\s*"value"\s*:\s*"(\d+)%"/.exec(json) || lines.map(l => /^Signal:\s*(\d+)%/.exec(l)).find(Boolean)
   return m ? Number(m[1]) : null
 }
 

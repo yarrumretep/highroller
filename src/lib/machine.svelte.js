@@ -30,7 +30,7 @@ export function log(line) {
 
 // FluidNC does not read lines from the app while an SD job runs, so the app's own queries wait for idle.
 const whenIdle = []
-const idle = s => s.state === 'Idle' && !s.sd
+const idle = s => (s.state === 'Idle' || s.state === 'Alarm') && !s.sd // FluidNC answers $ queries in Alarm too (a fresh boot)
 export function runWhenIdle(fn) {
   if (!whenIdle.includes(fn)) whenIdle.push(fn) // a reconnect during a long job would otherwise queue it again
   if (idle(machine.status)) flushIdle()
@@ -93,7 +93,7 @@ async function readMaxRates() {
 async function readWifi() {
   if (!idle(machine.status) || wifiPending) return
   wifiPending = true
-  const r = await fnc.send('$System/Stats', { quiet: true })
+  const r = await fnc.send('$System/Stats=json=yes', { quiet: true }) // the plain form has no signal line on 3.9.9
   wifiPending = false
   if (r.ok) machine.wifi = wifiPercent(r.lines)
 }

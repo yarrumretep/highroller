@@ -214,10 +214,16 @@ export function start(port = 8081) {
     }
     const l = text.trim().toUpperCase()
     if (!l) return
-    if (l === '$SYSTEM/STATS') { // just enough of ESP420 for the Wi-Fi indicator
+    if (l === '$SYSTEM/STATS=JSON=YES') { // ESP420 as JSON: 3.9.9 sends it in [MSG:JSON:…] chunks of up to 100 characters, split anywhere
       wifi = clamp(wifi + Math.random() * 10 - 5, 55, 85)
-      reply('Current WiFi Mode: STA')
-      reply(`Signal: ${Math.round(wifi)}%`)
+      const json = `{"cmd":"420","status":"ok","data":[{"id":"Chip ID","value":"36942"},{"id":"Signal","value":"${Math.round(wifi)}%"},{"id":"FW version","value":"FluidNC v3.9.9"}]}`
+      for (let i = 0; i < json.length; i += 100) reply(`[MSG:JSON:${json.slice(i, i + 100)}]`)
+      return ok()
+    }
+    if (l === '$SYSTEM/STATS') { // the plain form, as 3.9.9 prints it: no signal line
+      reply('Chip ID: 36942')
+      reply('[MSG:Mode=STA:SSID=shop:Status=Connected:IP=192.168.1.2:MAC=4C-C3-82-2F-4E-90]')
+      reply('FW version: FluidNC v3.9.9')
       return ok()
     }
     if (l.startsWith('$RI=')) { // a full report follows $RI
