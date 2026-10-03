@@ -24,11 +24,14 @@
   }
   const up = () => go(job.dir.includes('/') ? job.dir.slice(0, job.dir.lastIndexOf('/')) : '')
   function tap(e) {
-    if (e.dir) go(pathOf(e))
-    else selected = e
+    selected = e // a single tap selects either kind; entering a folder or opening a file needs a double-tap or Open
   }
   async function open() {
-    if (!selected || selected.dir) return
+    if (!selected) return
+    if (selected.dir) {
+      await go(pathOf(selected))
+      return
+    }
     await load(pathOf(selected), selected.size)
     onclose()
   }
@@ -42,11 +45,15 @@
   function pick(ev) {
     const file = ev.currentTarget.files[0]
     ev.currentTarget.value = ''
-    if (file) upload(file, job.dir)
+    if (file) {
+      selected = null // the just-uploaded file isn't the stale selection from before
+      upload(file, job.dir)
+    }
   }
   async function create() {
     const name = newFolder.trim()
     if (!name) return
+    selected = null
     await mkdir(job.dir, name)
     if (!job.error) newFolder = null
   }
@@ -60,7 +67,7 @@
   </header>
   <section>
     {#each entries as e (e.name)}
-      <button class="entry" class:on={selected === e} class:dir={e.dir} class:bad={!e.dir && badName(pathOf(e))} ondblclick={() => !e.dir && selected === e && open()} onclick={() => tap(e)} title={!e.dir && badName(pathOf(e)) ? 'FluidNC cannot run this name: rename it' : ''}>
+      <button class="entry" class:on={selected === e} class:dir={e.dir} class:bad={!e.dir && badName(pathOf(e))} ondblclick={() => (e.dir ? go(pathOf(e)) : open())} onclick={() => tap(e)} title={!e.dir && badName(pathOf(e)) ? 'FluidNC cannot run this name: rename it' : ''}>
         <span class="name">{e.dir ? '📁 ' : ''}{e.name}</span>
         {#if !e.dir}<span class="muted mono">{size(e.size)}</span>{/if}
       </button>
@@ -82,7 +89,7 @@
     <button disabled={busy} onclick={() => (newFolder = newFolder === null ? '' : null)}>New folder</button>
     {#if selected && !selected.dir}<a class="button" href={sdUrl(pathOf(selected))} download={selected.name}>Download</a>{/if}
     <button disabled={busy || !selected} onclick={del}>Delete</button>
-    <button class="go" disabled={busy || !selected || selected.dir || badName(pathOf(selected))} onclick={open}>Open</button>
+    <button class="go" disabled={busy || !selected || (!selected.dir && badName(pathOf(selected)))} onclick={open}>Open</button>
   </footer>
 </dialog>
 

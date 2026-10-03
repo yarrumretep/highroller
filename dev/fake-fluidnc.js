@@ -388,17 +388,17 @@ export function start(port = 8081) {
     if (url.pathname === '/upload' && req.method === 'POST') {
       const body = Readable.toWeb(req)
       const form = await new Request(url, { method: 'POST', headers: { 'content-type': req.headers['content-type'] }, body, duplex: 'half' }).formData()
-      let status = 'Ok'
+      let result = 'Ok' // "status" would shadow the status() broadcast function above
       let dir = ''
       for (const [, v] of form) {
         if (typeof v !== 'string') {
           const p = v.name.replace(/^\//, '')
           dir = parent(p)
-          if (dir !== '' && !dirs.has(dir)) { status = 'Upload failed'; continue } // the folder does not exist: store nothing
+          if (dir !== '' && !dirs.has(dir)) { result = 'Upload failed'; continue } // the folder does not exist: store nothing
           sd.set(p, Buffer.from(await v.arrayBuffer()))
         }
       }
-      return json(res, dirListing(dir, status))
+      return json(res, dirListing(dir, result))
     }
     if (url.pathname === '/upload') {
       const dir = norm(url.searchParams.get('path'))
