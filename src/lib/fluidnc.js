@@ -34,10 +34,11 @@ export class FluidNC {
 
   // Resolves with { ok, error, lines } when FluidNC answers ok or error:N. Never rejects.
   // Refuses at once when not connected, so motion is never queued for later.
-  send(line) {
+  // quiet: the app's own queries; their output stays out of onLine (alarms still go through).
+  send(line, { quiet = false } = {}) {
     if (this.ws?.readyState !== OPEN) return Promise.resolve({ ok: false, error: 'disconnected', lines: [] })
     return new Promise(resolve => {
-      this.queue.push({ line, resolve, lines: [] })
+      this.queue.push({ line, resolve, lines: [], quiet })
       this._pump()
     })
   }
@@ -46,6 +47,11 @@ export class FluidNC {
   realtime(code) {
     if (this.ws?.readyState === OPEN) this.ws.send(String.fromCharCode(code))
   }
+
+  // Real-time commands by name, so their byte values live only here.
+  hold() { this.realtime(0x21) } // '!' feed hold
+  resume() { this.realtime(0x7e) } // '~' cycle start
+  jogCancel() { this.realtime(0x85) }
 
   // FluidNC drops everything on a soft reset, so nothing pending will be answered.
   reset() {
@@ -129,8 +135,8 @@ export class FluidNC {
       this.onStatus(this.status)
       return
     }
-    this.onLine(line)
     const c = this.inflight
+    if (!c?.quiet || line.startsWith('ALARM:')) this.onLine(line)
     if (!c) return
     if (line === 'ok' || line.startsWith('error:')) {
       this.inflight = null

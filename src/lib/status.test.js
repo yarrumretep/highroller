@@ -56,3 +56,8 @@ test('does not mutate the previous status', () => {
   assert.deepEqual(a.wco, [0, 0, 0])
   assert.equal(EMPTY.state, 'Unknown')
 })
+
+test('a file FluidNC has finished reading reports 100 %', () => {
+  const s = parseStatus('<Run|MPos:0,0,0|FS:0,0|SD: /sd/job.nc: Sent>')
+  assert.deepEqual(s.sd, { percent: 100, file: '/sd/job.nc' })
+})

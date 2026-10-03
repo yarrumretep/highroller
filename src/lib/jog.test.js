@@ -6,6 +6,7 @@ function fakeFnc() {
   const f = { sent: [], rt: [], pending: [], drops: [], status: { mpos: [0, 0, 0] } }
   f.send = line => new Promise(resolve => { f.sent.push(line); f.pending.push(resolve) })
   f.realtime = code => f.rt.push(code)
+  f.jogCancel = () => f.rt.push(0x85)
   f.dropQueued = match => f.drops.push(match)
   return f
 }

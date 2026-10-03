@@ -3,7 +3,6 @@
 // instead of running to the end of travel.
 const CHUNK_MS = 100 // travel time per jog move
 const AHEAD_MS = 250 // top up whenever less than this much motion is queued
-const JOG_CANCEL = 0x85
 const MAX_QUEUED_MS = 600 // never more than this much jog distance beyond what the machine has travelled
 const AXES = 'XYZ'
 
@@ -26,7 +25,7 @@ export function createJogger(fnc, now = () => Date.now()) {
       while (h.until - t < AHEAD_MS && h.sent - travelled < mmPerMs * MAX_QUEUED_MS) {
         jog(axis, dir * mmPerMs * CHUNK_MS, feed).then(r => {
           // This move may have reached FluidNC just after the release's cancel: cancel again.
-          if (r.ok && hold === null) fnc.realtime(JOG_CANCEL)
+          if (r.ok && hold === null) fnc.jogCancel()
         })
         h.until += CHUNK_MS
         h.sent += mmPerMs * CHUNK_MS
@@ -43,7 +42,7 @@ export function createJogger(fnc, now = () => Date.now()) {
     hold = null
     // Release cancels every pending jog, taps included: FluidNC's jog cancel flushes them all anyway.
     fnc.dropQueued(line => line.startsWith('$J='))
-    fnc.realtime(JOG_CANCEL)
+    fnc.jogCancel()
   }
 
   return { step: jog, start, stop }

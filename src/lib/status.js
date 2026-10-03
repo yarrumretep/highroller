@@ -36,8 +36,9 @@ export function parseStatus(line, prev = EMPTY) {
     else if (key === 'A') s.acc = val
     else if (key === 'Pn') s.pins = val
     else if (key === 'SD') {
+      // "12.50,/sd/job.nc" while running; " <name>: Sent" once FluidNC has read the whole file
       const c = val.indexOf(',')
-      s.sd = { percent: Number(val.slice(0, c)), file: val.slice(c + 1) }
+      s.sd = c < 0 ? { percent: 100, file: val.replace(/: Sent$/, '').trim() } : { percent: Number(val.slice(0, c)), file: val.slice(c + 1) }
     }
   }
   if (pos) {

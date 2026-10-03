@@ -158,3 +158,22 @@ test('dropQueued cancels matching commands that have not been sent', async t => 
   ws().rx('ok\n')
   assert.equal((await g).ok, true)
 })
+
+test('quiet commands keep their output out of onLine, except alarms', async t => {
+  const { fnc, ws, events } = setup(t)
+  ws().open()
+  ws().rx('ok\n') // answers $RI=100, which is not quiet
+  const p = fnc.send('$/axes/z/max_rate_mm_per_min', { quiet: true })
+  ws().rx('$/axes/z/max_rate_mm_per_min=900.000\nALARM:1\nok\n')
+  assert.deepEqual((await p).lines, ['$/axes/z/max_rate_mm_per_min=900.000', 'ALARM:1'])
+  assert.deepEqual(events.lines, ['ok', 'ALARM:1'])
+})
+
+test('hold, resume and jogCancel send their real-time bytes', t => {
+  const { fnc, ws } = setup(t)
+  ws().open()
+  fnc.hold()
+  fnc.resume()
+  fnc.jogCancel()
+  assert.deepEqual(ws().sent.slice(1), ['!', '~', '\x85'])
+})

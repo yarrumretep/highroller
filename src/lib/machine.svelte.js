@@ -35,7 +35,7 @@ export const fnc = new FluidNC({
     machine.conn = c
     if (c === 'open') {
       machine.everOpen = true
-      fnc.realtime(0x85) // cancel any jog left running from before the link dropped
+      fnc.jogCancel() // cancel any jog left running from before the link dropped
       readMaxRates()
     }
   },
@@ -45,7 +45,7 @@ import.meta.hot?.dispose(() => fnc.close()) // dev hot reload: don't leave the o
 
 async function readMaxRates() {
   for (const axis of ['X', 'Y', 'Z']) {
-    const r = await fnc.send(`$/axes/${axis.toLowerCase()}/max_rate_mm_per_min`)
+    const r = await fnc.send(`$/axes/${axis.toLowerCase()}/max_rate_mm_per_min`, { quiet: true })
     const v = Number(r.lines.find(l => l.startsWith('$/'))?.split('=')[1])
     if (v > 0) machine.maxRate[axis] = v
   }
