@@ -56,6 +56,7 @@
 | `src/components/Calibrate.svelte` (new) | The wizard dialog driven by `calibrate(io)` |
 | `src/App.svelte` (modify) | Tools tab; preview props |
 | `src/components/Preview.svelte` (modify) | Machine coordinates, travel outline, fit toggle; tap to go there |
+| `src/lib/track.js`, `src/lib/job.svelte.js`, `src/components/Job.svelte` (modify) | Progress by time; a time-left estimate that learns |
 | `dev/fake-fluidnc.js` (modify) | Touch plate and probing, flash files, `$Bye`, `$HZ`, `G4` |
 
 ---
@@ -1997,7 +1998,154 @@ git commit -m "Tap the preview to send the router to that spot"
 
 ---
 
-### Task 12: On the machine (done by the user, hands near the e-stop)
+### Task 12: Job progress by time, with a time-left estimate that learns
+
+**Files:**
+- Modify: `src/lib/track.js`, `src/lib/track.test.js`, `src/lib/job.svelte.js`, `src/components/Job.svelte`
+
+**Interfaces:**
+- Consumes: the job shape (`pts`, `time`), `job.current`, `machine.status.sd/wpos`.
+- Produces:
+  - `along(job, i, pos): number` — how far along segment `i` the tool is, 0..1 (1 for a zero-length segment, 0 when `i < 0`).
+  - `progress(job, i, u, elapsed, ratio): { fraction, left, ratio, learning }` — `fraction` is estimated time done ÷ total (progress by time, not by file bytes); `left` is the remaining estimate scaled by `ratio`, the smoothed real-time ÷ estimated-time factor (null, i.e. 1, until 30 s of estimated time has run; then an exponential average moving a tenth of the way per update); `learning` is true while the ratio is still unknown.
+  - `job.along` (set with `job.current` by the follower). `remaining()` is removed.
+  - The Job panel shows the time-based percent, the elapsed time, and the time left, marked `~` while learning and rounded to 10 s once over two minutes. Without parsed G-code it falls back to FluidNC's byte percent.
+- Why: FluidNC's `SD:` percent is the file read position, which runs ahead of the cut and measures bytes, not time; and the previous time-left switched formulas at 30 s and reacted to every blip, so it rose and fell.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `src/lib/track.test.js`, change the import to `import { currentSegment, along, progress } from './track.js'`, delete the `remaining time …` test, and add:
+```js
+test('along: how far the tool is through the current segment', () => {
+  assert.equal(along(line10, 2, [25, 0, 0]), 0.5)
+  assert.equal(along(line10, 2, [19, 0, 0]), 0)
+  assert.equal(along(line10, -1, [0, 0, 0]), 0)
+})
+
+test('progress by time, within the current segment', () => {
+  const p = progress(line10, 2, 0.5, 0, null) // halfway along segment 2 (which ends at 3 s): 2.5 s of 10
+  assert.equal(p.fraction, 0.25)
+  assert.equal(p.left, 7.5)
+  assert.equal(p.learning, true)
+})
+
+test('before any motion there is no progress and the raw estimate is the time left', () => {
+  const p = progress(line10, -1, 0, 0, null)
+  assert.deepEqual([p.fraction, p.left], [0, 10])
+})
+
+test('once enough has run, the time left follows the real speed, smoothed', () => {
+  const long = { ...line10, time: Float64Array.from([40, 80]) } // two segments of 40 s
+  let p = progress(long, 0, 1, 80, null) // 40 s estimated took 80 s: twice as slow
+  assert.equal(p.ratio, 2)
+  assert.equal(p.left, 80)
+  assert.equal(p.learning, false)
+  p = progress(long, 0, 1, 40, p.ratio) // a reading of 1.0 moves the smoothed ratio a tenth of the way
+  assert.ok(Math.abs(p.ratio - 1.9) < 1e-9)
+  assert.ok(Math.abs(p.left - 76) < 1e-9)
+})
+```
+
+- [ ] **Step 2: Run the tests and confirm they fail**
+
+Run: `node --disable-warning=ExperimentalWarning --test src/lib/track.test.js`
+Expected: FAIL (`along`/`progress` are not exported).
+
+- [ ] **Step 3: Implement in `src/lib/track.js`**
+
+Delete `remaining` and append:
+```js
+// How far along segment i the tool is (0..1), for smooth progress inside long moves.
+export function along(job, i, [x, y, z]) {
+  if (i < 0) return 0
+  const p = job.pts
+  const ax = p[i * 3], ay = p[i * 3 + 1], az = p[i * 3 + 2]
+  const dx = p[i * 3 + 3] - ax, dy = p[i * 3 + 4] - ay, dz = p[i * 3 + 5] - az
+  const len2 = dx * dx + dy * dy + dz * dz
+  return len2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy + (z - az) * dz) / len2)) : 1
+}
+
+// Progress by estimated time, and a time-left estimate that learns how fast the job really runs.
+// `ratio` (real time ÷ estimated time) is carried between calls, smoothed, and unknown until enough has run.
+const LEARN_AFTER_S = 30
+const SMOOTH = 0.1
+
+export function progress(job, i, u, elapsed, ratio) {
+  const total = job.time.at(-1) ?? 0
+  const start = i > 0 ? job.time[i - 1] : 0
+  const done = i < 0 ? 0 : start + u * (job.time[i] - start)
+  if (done > LEARN_AFTER_S && elapsed > 0) {
+    const r = elapsed / done
+    ratio = ratio == null ? r : ratio + SMOOTH * (r - ratio)
+  }
+  return { fraction: total ? done / total : 0, left: Math.max(0, (total - done) * (ratio ?? 1)), ratio, learning: ratio == null }
+}
+```
+
+- [ ] **Step 4: Run the tests and confirm they pass**
+
+Run: `node --disable-warning=ExperimentalWarning --test src/lib/track.test.js`
+Expected: PASS, 9 tests.
+
+- [ ] **Step 5: Track `along` in `src/lib/job.svelte.js`**
+
+- Import: `import { currentSegment, along } from './track.js'`.
+- Add `along: 0,` to the `job` state object (after `current: -1,`).
+- In the follower, after `job.current = currentSegment(job.data, s.sd.percent, s.wpos, job.current)`, add:
+```js
+      job.along = along(job.data, job.current, s.wpos)
+```
+- Where a job starts (`job.current = -1` in the `!wasRunning` branch) also set `job.along = 0`.
+
+- [ ] **Step 6: Show it in `src/components/Job.svelte`**
+
+- Import `progress` instead of `remaining`: `import { progress } from '../lib/track.js'`.
+- Replace the `onMount` block and the `total`/`left` deriveds with:
+```js
+  let est = $state(null) // the latest progress estimate, updated once a second while a job runs
+  onMount(() => {
+    refresh()
+    const t = setInterval(tick, 1000)
+    return () => clearInterval(t)
+  })
+  function tick() {
+    now = Date.now()
+    if (!job.data || !machine.status.sd || !job.startedAt) {
+      est = null
+      return
+    }
+    est = progress(job.data, job.current, job.along, (now - job.startedAt) / 1000, est?.ratio ?? null)
+  }
+  const total = $derived(job.data?.time.at(-1) ?? 0)
+  const fraction = $derived(est?.fraction ?? (s.sd ? s.sd.percent / 100 : 0))
+  const eta = sec => (sec > 120 ? Math.round(sec / 10) * 10 : Math.round(sec)) // steadier once it is minutes
+```
+- Replace the progress block in the markup with:
+```svelte
+  {#if running}
+    <progress max="1" value={fraction}></progress>
+    <div class="times mono">
+      <span>{Math.round(fraction * 100)}%</span>
+      <span>{clock(elapsed)} gone</span>
+      <span>{est ? `${est.learning ? '~' : ''}${clock(eta(est.left))} left` : '…'}</span>
+    </div>
+  {/if}
+```
+
+- [ ] **Step 7: Build and check against the fake (the controller does this step)**
+
+`npm run build` must succeed. Run a job on the fake: the percent climbs smoothly with the cut (not in jumps as the file is read), the time left starts with `~`, and after 30 s of estimated time it settles rather than rising and falling.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/lib/track.js src/lib/track.test.js src/lib/job.svelte.js src/components/Job.svelte
+git commit -m "Show job progress by time and a time-left estimate that learns the real speed"
+```
+
+---
+
+### Task 13: On the machine (done by the user, hands near the e-stop)
 
 - [ ] **Step 1: Probe Z0.** With the plate on the stock and the clip on: tap, Probe Z0, and check the work Z reads the plate thickness at contact, then 5 mm higher.
 - [ ] **Step 2: A calibration pass.** Set the gantry span. Tape at the four corners. Run the routine and measure. Before pressing Apply, compare the review's numbers with what you'd expect; untick anything doubtful. After the restart and home, check `config.yaml.bak` exists on the flash (More → Console: `$LocalFS/List`).
