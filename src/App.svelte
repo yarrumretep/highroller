@@ -47,7 +47,11 @@
       wpos={machine.status.wpos}
       wco={machine.status.wco}
       range={machine.config?.range ?? null}
-      canGo={machine.conn === 'open' && machine.status.state === 'Idle' && !job.running && machine.homed.X && machine.homed.Y}
+      goBlocked={machine.conn !== 'open' ? 'Not connected'
+        : job.running ? 'A job is running'
+        : machine.status.state !== 'Idle' ? `Wait for Idle (now ${machine.status.state})`
+        : !(machine.homed.X && machine.homed.Y) ? 'Home X and Y first: a tap moves in machine coordinates'
+        : ''}
       onGo={goTo}
     />
     <Job />

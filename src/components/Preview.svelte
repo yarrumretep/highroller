@@ -3,7 +3,9 @@
 
   // Drawn in machine coordinates: the file's work coordinates shifted by the work offset `wco`, the tool at
   // `mpos`. `wpos` supplies the work Z for the red/green rule; `range` is the X/Y travel, if known.
-  let { job = null, current = -1, mpos = [0, 0, 0], wpos = [0, 0, 0], wco = [0, 0, 0], range = null, canGo = false, onGo = null } = $props()
+  // goBlocked: why a tap cannot move the machine right now ('' when it can) — shown when the user taps anyway
+  let { job = null, current = -1, mpos = [0, 0, 0], wpos = [0, 0, 0], wco = [0, 0, 0], range = null, goBlocked = 'Not connected', onGo = null } = $props()
+  const canGo = $derived(!goBlocked)
 
   let box, base, trail, dot
   let size = { w: 0, h: 0, dpr: 1 }
@@ -219,15 +221,15 @@
     press = null
   }
   function tap([px, py]) {
-    if (!canGo) return
+    if (!canGo) { goError = goBlocked; return } // say why rather than ignore the tap
     if (target && Math.hypot(sx(target.x) - px, sy(target.y) - py) < 16) { // tapping the crosshair clears it
       target = null
       goError = ''
       return
     }
-    if (!range) return // can't validate the reach yet
+    if (!range) { goError = "The machine's travel is not known yet (config not read)"; return }
     const x = mx(px), y = my(py)
-    if (x < range.X.min || x > range.X.max || y < range.Y.min || y > range.Y.max) return // outside the reach
+    if (x < range.X.min || x > range.X.max || y < range.Y.min || y > range.Y.max) { goError = "Outside the machine's reach"; return }
     target = { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 }
     goError = ''
   }
