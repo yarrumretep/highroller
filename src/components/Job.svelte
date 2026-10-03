@@ -2,22 +2,32 @@
   import { onMount } from 'svelte'
   import { machine } from '../lib/machine.svelte.js'
   import { job, refresh, load, upload, run, pause, resume, remove } from '../lib/job.svelte.js'
-  import { remaining } from '../lib/track.js'
+  import { progress } from '../lib/track.js'
 
   let picker
   let now = $state(Date.now())
+  let est = $state(null) // the latest progress estimate, updated once a second while a job runs
   onMount(() => {
     refresh()
-    const t = setInterval(() => (now = Date.now()), 1000)
+    const t = setInterval(tick, 1000)
     return () => clearInterval(t)
   })
+  function tick() {
+    now = Date.now()
+    if (!job.data || !machine.status.sd || !job.startedAt) {
+      est = null
+      return
+    }
+    est = progress(job.data, job.current, job.along, (now - job.startedAt) / 1000, est?.ratio ?? null)
+  }
 
   const s = $derived(machine.status)
   const running = $derived(!!s.sd)
   const idle = $derived(machine.conn === 'open' && s.state === 'Idle')
   const elapsed = $derived(running && job.startedAt ? (now - job.startedAt) / 1000 : 0)
   const total = $derived(job.data?.time.at(-1) ?? 0)
-  const left = $derived(job.data ? remaining(job.data, job.current, elapsed) : 0)
+  const fraction = $derived(est?.fraction ?? (s.sd ? s.sd.percent / 100 : 0))
+  const eta = sec => (sec > 120 ? Math.round(sec / 10) * 10 : Math.round(sec)) // steadier once it is minutes
 
   function clock(sec) {
     const t = Math.max(0, Math.round(sec))
@@ -40,11 +50,11 @@
   </div>
 
   {#if running}
-    <progress max="100" value={s.sd.percent}></progress>
+    <progress max="1" value={fraction}></progress>
     <div class="times mono">
-      <span>{s.sd.percent.toFixed(1)}%</span>
+      <span>{Math.round(fraction * 100)}%</span>
       <span>{clock(elapsed)} gone</span>
-      <span>{clock(left)} left</span>
+      <span>{est ? `${est.learning ? '~' : ''}${clock(eta(est.left))} left` : '…'}</span>
     </div>
   {/if}
 

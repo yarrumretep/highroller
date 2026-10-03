@@ -42,11 +42,28 @@ export function currentSegment(job, percent, pos, prev = -1) {
   return best
 }
 
-// Time left: the G-code estimate for what's left, scaled by how fast the job has really gone.
-export function remaining(job, i, elapsed) {
+// How far along segment i the tool is (0..1), for smooth progress inside long moves.
+export function along(job, i, [x, y, z]) {
+  if (i < 0) return 0
+  const p = job.pts
+  const ax = p[i * 3], ay = p[i * 3 + 1], az = p[i * 3 + 2]
+  const dx = p[i * 3 + 3] - ax, dy = p[i * 3 + 4] - ay, dz = p[i * 3 + 5] - az
+  const len2 = dx * dx + dy * dy + dz * dz
+  return len2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy + (z - az) * dz) / len2)) : 1
+}
+
+// Progress by estimated time, and a time-left estimate that learns how fast the job really runs.
+// `ratio` (real time ÷ estimated time) is carried between calls, smoothed, and unknown until enough has run.
+const LEARN_AFTER_S = 30
+const SMOOTH = 0.1
+
+export function progress(job, i, u, elapsed, ratio) {
   const total = job.time.at(-1) ?? 0
-  if (i < 0) return total
-  const done = job.time[i]
-  const left = total - done
-  return done > 30 ? (left * elapsed) / done : left // ponytail: trust the raw estimate for the first 30 s
+  const start = i > 0 ? job.time[i - 1] : 0
+  const done = i < 0 ? 0 : start + u * (job.time[i] - start)
+  if (done > LEARN_AFTER_S && elapsed > 0) {
+    const r = elapsed / done
+    ratio = ratio == null ? r : ratio + SMOOTH * (r - ratio)
+  }
+  return { fraction: total ? done / total : 0, left: Math.max(0, (total - done) * (ratio ?? 1)), ratio, learning: ratio == null }
 }

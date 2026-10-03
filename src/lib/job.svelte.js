@@ -2,14 +2,14 @@ import { untrack } from 'svelte'
 import { machine, send, fnc } from './machine.svelte.js'
 import { sdFiles } from './files.js'
 import { parseGcode } from './gcode.js'
-import { currentSegment } from './track.js'
+import { currentSegment, along } from './track.js'
 import { cacheGet, cachePut } from './jobcache.js'
 
 const sd = sdFiles()
 const baseName = file => file.replace(/^\/sd\//i, '').replace(/^\//, '')
 
 // The Job tab's state: SD files, the loaded G-code, and how far a running job has got.
-export const job = $state({ files: [], error: '', busy: '', upload: null, name: '', data: null, current: -1, startedAt: 0, failed: '' })
+export const job = $state({ files: [], error: '', busy: '', upload: null, name: '', data: null, current: -1, along: 0, startedAt: 0, failed: '' })
 
 export async function refresh() {
   try {
@@ -83,6 +83,7 @@ $effect.root(() => {
       if (!wasRunning) {
         wasRunning = true
         job.current = -1 // a job just started, here or elsewhere: track it from its beginning
+        job.along = 0
       }
       const name = baseName(s.sd.file)
       if (name !== job.name) {
@@ -92,6 +93,7 @@ $effect.root(() => {
       }
       if (!job.data) return
       job.current = currentSegment(job.data, s.sd.percent, s.wpos, job.current)
+      job.along = along(job.data, job.current, s.wpos)
       // First sight of this job: assume it has kept to the estimate so far
       if (!job.startedAt) job.startedAt = Date.now() - 1000 * (job.data.time[job.current] ?? 0)
     })

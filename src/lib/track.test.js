@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { currentSegment, remaining } from './track.js'
+import { currentSegment, along, progress } from './track.js'
 
 // 10 segments of 10 mm along X, one per 10-byte line, 1 s each
 const line10 = {
@@ -24,11 +24,33 @@ test('before any motion line has been read there is no current segment', () => {
   assert.equal(currentSegment(job, 10, [0, 0, 0]), -1)
 })
 
-test('remaining time is the raw estimate early on, then scaled by real progress', () => {
-  assert.equal(remaining(line10, -1, 0), 10)
-  assert.equal(remaining(line10, 4, 99), 5) // only 5 s estimated done: trust the estimate
-  const long = { ...line10, time: Float64Array.from([40, 80]) }
-  assert.equal(remaining(long, 0, 80), 80) // running at half the estimated speed
+test('along: how far the tool is through the current segment', () => {
+  assert.equal(along(line10, 2, [25, 0, 0]), 0.5)
+  assert.equal(along(line10, 2, [19, 0, 0]), 0)
+  assert.equal(along(line10, -1, [0, 0, 0]), 0)
+})
+
+test('progress by time, within the current segment', () => {
+  const p = progress(line10, 2, 0.5, 0, null) // halfway along segment 2 (which ends at 3 s): 2.5 s of 10
+  assert.equal(p.fraction, 0.25)
+  assert.equal(p.left, 7.5)
+  assert.equal(p.learning, true)
+})
+
+test('before any motion there is no progress and the raw estimate is the time left', () => {
+  const p = progress(line10, -1, 0, 0, null)
+  assert.deepEqual([p.fraction, p.left], [0, 10])
+})
+
+test('once enough has run, the time left follows the real speed, smoothed', () => {
+  const long = { ...line10, time: Float64Array.from([40, 80]) } // two segments of 40 s
+  let p = progress(long, 0, 1, 80, null) // 40 s estimated took 80 s: twice as slow
+  assert.equal(p.ratio, 2)
+  assert.equal(p.left, 80)
+  assert.equal(p.learning, false)
+  p = progress(long, 0, 1, 40, p.ratio) // a reading of 1.0 moves the smoothed ratio a tenth of the way
+  assert.ok(Math.abs(p.ratio - 1.9) < 1e-9)
+  assert.ok(Math.abs(p.left - 76) < 1e-9)
 })
 
 test('a path that revisits a point resolves to the earliest visit not yet passed', () => {
