@@ -3,6 +3,7 @@
 // SD files over HTTP (/upload, /sd/<name>) and running them with $SD/Run, the way 3.9.9 does:
 // lines from clients wait while a job's file is being read, and SD: goes once the file has been read.
 // ponytail: grows only as features need it; job arcs run as straight lines, G20 and M2/M30 are ignored.
+import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { Readable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
@@ -357,6 +358,9 @@ export function start(port = 8081) {
   })
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://fake')
+    if (url.pathname === '/') { // the built app, so it can be tried without Vite (no HMR reloads mid-wizard)
+      try { const html = await readFile(new URL('../dist/index.html', import.meta.url)); res.writeHead(200, { 'Content-Type': 'text/html' }); return res.end(html) } catch { res.writeHead(404); return res.end('run npm run build first') }
+    }
     if (url.pathname === '/fake/touch') { touchUntil = Date.now() + 800; status(); res.writeHead(200); return res.end() }
     if (url.pathname === '/fake/plate') { plateZ = Number(url.searchParams.get('z')); res.writeHead(200); return res.end() }
     if (url.pathname === '/files' && req.method === 'POST') {

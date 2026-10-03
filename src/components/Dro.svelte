@@ -11,10 +11,12 @@
   // The Probe button arms only after the probe input has closed and opened again: proof the clip is on.
   let armed = $state(false)
   let seenClosed = false
+  const HINT = 'To probe: plate under the bit, clip on, tap the plate to the bit, then press.'
+  let hint = $state(false) // Probe was pressed before the plate had touched the bit
   $effect(() => {
     const p = machine.status.pins.includes('P')
     if (p) seenClosed = true
-    else if (seenClosed) armed = true
+    else if (seenClosed) { armed = true; hint = false }
     if (machine.conn !== 'open') { seenClosed = false; armed = false }
   })
 
@@ -57,11 +59,12 @@
       <span class="axis">{axis}</span>
       <span class="work mono">{machine.status.wpos?.[i]?.toFixed(3) ?? '–.---'}</span>
       <span class="mach mono" title="Machine position">{machine.status.mpos?.[i]?.toFixed(3) ?? '–.---'}</span>
-      <button disabled={!idle || !machine.status.wpos} onclick={() => send(`G10 L20 P0 ${axis}0`)}>Zero</button>
+      <button disabled={!idle || !machine.status.wpos || !!busy} onclick={() => run('Zeroing…', () => cmd(`G10 L20 P0 ${axis}0`))}>Zero</button>
     </div>
   {/each}
   <div class="helpers">
-    <button disabled={!idle || !armed || !!busy} onclick={probe} title="Put the plate under the bit, clip on, tap the plate to the bit, then press">Probe Z0</button>
+    <!-- Enabled before the plate has touched: pressing it then shows the hint (a disabled button cannot be tapped for help) -->
+    <button disabled={!idle || !!busy} onclick={() => (armed ? probe() : (hint = true))} title={HINT}>Probe Z0</button>
     <button disabled={!idle || !!busy || top == null} onclick={goXY0}>Go to XY0</button>
     <button disabled={!idle || !!busy || top == null} onclick={raise}>Raise Z</button>
   </div>
@@ -71,9 +74,8 @@
     <button disabled={!canHome || !!busy} onclick={() => home('Y')}>Home Y</button>
     <button disabled={!canHome || !!busy} onclick={() => home('Z')}>Home Z</button>
   </div>
-  {#if busy}<p class="note">{busy}</p>{/if}
-  {#if !armed && idle && !busy}<p class="note">To probe: plate under the bit, clip on, tap the plate to the bit.</p>{/if}
-  {#if error}<p class="note err">{error}</p>{/if}
+  <!-- One line that is always there, so a note coming or going never shifts the jog pad -->
+  <p class="note" class:err={!busy && !!error}>{busy || error || (hint && !armed ? HINT : '')}</p>
 </div>
 
 <style>
@@ -85,6 +87,6 @@
   .helpers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 4px; }
   .homes { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 6px; }
   .homes button { min-height: 44px; padding: 0 6px; font-size: 13px; } /* smaller than the jog buttons, still a finger-sized target */
-  .note { margin: 0; font-size: 13px; color: var(--muted); }
+  .note { margin: 0; min-height: 1.3em; font-size: 13px; color: var(--muted); }
   .err { color: var(--bad); }
 </style>
