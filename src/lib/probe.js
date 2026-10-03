@@ -39,7 +39,7 @@ export async function probeZ(fnc, opts = {}) {
     }
     if (r.lines.some(l => /^\[PRB:[^\]]*:0\]/.test(l) || l.startsWith('ALARM:5'))) {
       alarmed = true
-      throw fail('No contact: is the plate under the bit and the clip attached?')
+      throw fail('No contact: is the plate under the bit and the clip attached? Re-home Z before moving on (the bit may have stalled).')
     }
     if (!r.ok) throw fail(`Probe refused: error ${r.error}`, !at)
     const [x, y, z] = prb(r.lines)
