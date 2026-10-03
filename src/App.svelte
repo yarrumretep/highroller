@@ -9,7 +9,7 @@
   import Console from './components/Console.svelte'
   import Tools from './components/Tools.svelte'
   import Calibrate from './components/Calibrate.svelte'
-  import { machine } from './lib/machine.svelte.js'
+  import { machine, send } from './lib/machine.svelte.js'
   import { job } from './lib/job.svelte.js'
 
   const TABS = [['jog', 'Jog'], ['job', 'Job'], ['tools', 'Tools'], ['more', 'More']]
@@ -29,7 +29,16 @@
     <JogPad />
   </section>
   <section class:off={tab !== 'job'}>
-    <Preview job={job.data} current={job.current} mpos={machine.status.mpos} wpos={machine.status.wpos} wco={machine.status.wco} range={machine.config?.range ?? null} />
+    <Preview
+      job={job.data}
+      current={job.current}
+      mpos={machine.status.mpos}
+      wpos={machine.status.wpos}
+      wco={machine.status.wco}
+      range={machine.config?.range ?? null}
+      canGo={machine.conn === 'open' && machine.status.state === 'Idle' && !job.running}
+      onGo={(x, y) => send(`G53 G0 X${Math.round(x * 1000) / 1000} Y${Math.round(y * 1000) / 1000}`)}
+    />
     <Job />
     <Overrides />
   </section>

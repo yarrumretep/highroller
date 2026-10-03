@@ -3,7 +3,7 @@
 
   // Drawn in machine coordinates: the file's work coordinates shifted by the work offset `wco`, the tool at
   // `mpos`. `wpos` supplies the work Z for the red/green rule; `range` is the X/Y travel, if known.
-  let { job = null, current = -1, mpos = [0, 0, 0], wpos = [0, 0, 0], wco = [0, 0, 0], range = null } = $props()
+  let { job = null, current = -1, mpos = [0, 0, 0], wpos = [0, 0, 0], wco = [0, 0, 0], range = null, canGo = false, onGo = null } = $props()
 
   let box, base, trail, dot
   let size = { w: 0, h: 0, dpr: 1 }
@@ -16,6 +16,10 @@
   const sy = y => view.oy - y * view.scale
   const jx = x => sx(x + wco[0]) // a job (work) coordinate on screen
   const jy = y => sy(y + wco[1])
+  const mx = px => (px - view.ox) / view.scale // screen → machine
+  const my = py => (view.oy - py) / view.scale
+  let target = $state(null) // { x, y } machine coordinates of the tapped spot
+  const TAP_PX = 8 // a press that moves less than this is a tap
 
   function ctxOf(canvas) {
     const ctx = canvas.getContext('2d')
@@ -79,6 +83,15 @@
       ctx.moveTo(jx(p[current * 3]), jy(p[current * 3 + 1]))
       ctx.lineTo(x, y)
       ctx.strokeStyle = colors.cut
+      ctx.lineWidth = 2
+      ctx.stroke()
+    }
+    if (target && canGo) {
+      const tx = sx(target.x), ty = sy(target.y)
+      ctx.beginPath()
+      ctx.moveTo(tx - 10, ty); ctx.lineTo(tx + 10, ty)
+      ctx.moveTo(tx, ty - 10); ctx.lineTo(tx, ty + 10)
+      ctx.strokeStyle = colors.accent
       ctx.lineWidth = 2
       ctx.stroke()
     }
@@ -150,6 +163,11 @@
     current
     if (size.w && !raf) drawDot()
   })
+  $effect(() => { if (!canGo) target = null })
+  $effect(() => {
+    target
+    if (size.w && !raf) drawDot()
+  })
 
   const pointers = new Map()
   function local(e) {
@@ -162,9 +180,11 @@
     view.scale *= factor
     redraw()
   }
+  let press = null // where a single pointer went down, to tell a tap from a drag
   function onpointerdown(e) {
     box.setPointerCapture(e.pointerId)
     pointers.set(e.pointerId, local(e))
+    press = pointers.size === 1 ? { id: e.pointerId, at: local(e) } : null
   }
   function onpointermove(e) {
     if (!pointers.has(e.pointerId)) return
@@ -176,12 +196,41 @@
       view.oy += after[0][1] - before[0][1]
       redraw()
     } else if (after.length === 2) {
+      press = null
       const gap = ps => Math.hypot(ps[0][0] - ps[1][0], ps[0][1] - ps[1][1])
       const mid = [(after[0][0] + after[1][0]) / 2, (after[0][1] + after[1][1]) / 2]
       if (gap(before) > 0) zoomAt(mid, gap(after) / gap(before))
     }
   }
-  const onpointerup = e => pointers.delete(e.pointerId)
+  function onpointerup(e) {
+    const p = pointers.get(e.pointerId)
+    pointers.delete(e.pointerId)
+    if (press?.id !== e.pointerId || !p) return
+    const [x0, y0] = press.at
+    press = null
+    if (Math.hypot(p[0] - x0, p[1] - y0) > TAP_PX) return
+    tap(p)
+  }
+  function onpointercancel(e) {
+    pointers.delete(e.pointerId)
+    press = null
+  }
+  function tap([px, py]) {
+    if (!canGo) return
+    if (target && Math.hypot(sx(target.x) - px, sy(target.y) - py) < 16) { // tapping the crosshair clears it
+      target = null
+      return
+    }
+    if (!range) return // can't validate the reach yet
+    const x = mx(px), y = my(py)
+    if (x < range.X.min || x > range.X.max || y < range.Y.min || y > range.Y.max) return // outside the reach
+    target = { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 }
+  }
+  function goToTarget() {
+    const t = target
+    target = null
+    onGo?.(t.x, t.y)
+  }
   function onwheel(e) {
     e.preventDefault()
     zoomAt(local(e), Math.exp(-e.deltaY * 0.0015))
@@ -190,7 +239,7 @@
   onMount(() => {
     const css = getComputedStyle(box)
     const v = name => css.getPropertyValue(name).trim()
-    colors = { path: v('--muted'), rapid: v('--line'), cut: v('--bad'), ok: v('--ok'), panel: v('--panel') }
+    colors = { path: v('--muted'), rapid: v('--line'), cut: v('--bad'), ok: v('--ok'), panel: v('--panel'), accent: v('--accent') }
     const ro = new ResizeObserver(() => {
       const r = box.getBoundingClientRect()
       if (!r.width || !r.height) return // hidden behind another tab
@@ -212,10 +261,13 @@
 </script>
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="panel preview" aria-label="Toolpath preview" bind:this={box} {onpointerdown} {onpointermove} {onpointerup} onpointercancel={onpointerup} ondblclick={toggleFit}>
+  <div class="panel preview" aria-label="Toolpath preview" bind:this={box} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} ondblclick={toggleFit}>
   <canvas bind:this={base}></canvas>
   <canvas bind:this={trail}></canvas>
   <canvas bind:this={dot}></canvas>
+  {#if target && canGo}
+    <button class="goto" onclick={goToTarget}>Go to X {target.x.toFixed(1)} Y {target.y.toFixed(1)}</button>
+  {/if}
   {#if !job}<p class="hint">{range ? 'Load a file to see it on the table' : 'Load a file to preview it here'}</p>{/if}
 </div>
 
@@ -223,5 +275,6 @@
   .preview { position: relative; height: 50vh; min-height: 260px; padding: 0; overflow: hidden; touch-action: none; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   .hint { position: absolute; inset: auto 0 12px; margin: 0; text-align: center; font-size: 14px; color: var(--muted); pointer-events: none; }
+  .goto { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); min-height: 48px; padding: 0 18px; font-weight: 700; color: white; background: var(--accent); border-color: var(--accent); }
   @media (min-width: 900px) { .preview { height: 60vh; } }
 </style>
