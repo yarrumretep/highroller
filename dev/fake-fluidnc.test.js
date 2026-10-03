@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { start } from './fake-fluidnc.js'
 import { FluidNC } from '../src/lib/fluidnc.js'
 import { wifiPercent } from '../src/lib/status.js'
+import { probeZ } from '../src/lib/probe.js'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -96,6 +97,84 @@ test('$System/Stats reports a Wi-Fi signal percentage', async () => {
     const r = await fnc.send('$System/Stats', { quiet: true })
     const pct = wifiPercent(r.lines)
     assert.ok(pct >= 55 && pct <= 85, `signal=${pct}`)
+  } finally {
+    fnc.close()
+    server.close()
+  }
+})
+
+test('probing finds the plate, the probe input can be touched, and a miss alarms', async () => {
+  const server = start(8093)
+  const fnc = new FluidNC({ host: 'localhost:8093' })
+  try {
+    const opened = new Promise(r => { fnc.onConnection = c => c === 'open' && r() })
+    fnc.connect()
+    await opened
+    assert.equal((await fnc.send('$X')).ok, true)
+    let sawPin = false
+    fnc.onStatus = s => { if (s.pins.includes('P')) sawPin = true }
+    await fetch('http://localhost:8093/fake/touch', { method: 'POST' })
+    await sleep(300)
+    assert.ok(sawPin, 'Pn:P after a touch')
+    const r = await probeZ(fnc, { fast: 3000, slow: 600, maxDown: 50 })
+    assert.ok(Math.abs(r.z - -40) < 1e-6, `z=${r.z}`)
+    await fetch('http://localhost:8093/fake/plate?z=-200', { method: 'POST' })
+    await assert.rejects(probeZ(fnc, { fast: 3000, slow: 600, maxDown: 10 }), /No contact/)
+    await sleep(100)
+    assert.equal(fnc.status.state, 'Alarm')
+  } finally {
+    fnc.close()
+    server.close()
+  }
+})
+
+test('G4 waits for motion, G53 uses machine coordinates, and $HZ homes only Z', async () => {
+  const server = start(8092)
+  const fnc = new FluidNC({ host: 'localhost:8092' })
+  try {
+    const opened = new Promise(r => { fnc.onConnection = c => c === 'open' && r() })
+    fnc.connect()
+    await opened
+    await fnc.send('$X')
+    await fnc.send('G10 L20 P0 X-5') // work X0 is now at machine X5
+    await fnc.send('G53 G0 X20 F3000')
+    const t0 = Date.now()
+    assert.equal((await fnc.send('G4 P0')).ok, true)
+    assert.ok(Date.now() - t0 > 100, 'G4 waited for the move')
+    await sleep(150)
+    assert.ok(Math.abs(fnc.status.mpos[0] - 20) < 1e-6, `mpos x=${fnc.status.mpos[0]}`)
+    await fnc.send('G0 Z-30')
+    await fnc.send('G4 P0')
+    const p = fnc.send('$HZ')
+    await sleep(1700)
+    assert.equal((await p).ok, true)
+    assert.ok(Math.abs(fnc.status.mpos[2]) < 1e-6 && Math.abs(fnc.status.mpos[0] - 20) < 1e-6)
+  } finally {
+    fnc.close()
+    server.close()
+  }
+})
+
+test('flash files: show, filename, upload, and $Bye restarts', async () => {
+  const server = start(8091)
+  const fnc = new FluidNC({ host: 'localhost:8091' })
+  try {
+    const opened = new Promise(r => { fnc.onConnection = c => c === 'open' && r() })
+    fnc.connect()
+    await opened
+    assert.deepEqual((await fnc.send('$Config/Filename', { quiet: true })).lines, ['$Config/Filename=config.yaml'])
+    const shown = await fnc.send('$LocalFS/Show=/config.yaml', { quiet: true })
+    assert.ok(shown.lines.some(l => l.trim() === 'pulloff_mm: 4.000'))
+    assert.equal((await fnc.send('$LocalFS/Show=/missing.json', { quiet: true })).ok, false)
+    const form = new FormData()
+    form.append('/highroller.json', '')
+    form.append('/highroller.jsonS', '12')
+    form.append('myfile', new Blob(['{"step":10}\n']), '/highroller.json')
+    assert.equal((await fetch('http://localhost:8091/files', { method: 'POST', body: form })).status, 200)
+    assert.deepEqual((await fnc.send('$LocalFS/Show=/highroller.json', { quiet: true })).lines, ['{"step":10}'])
+    const closed = new Promise(r => { fnc.onConnection = c => c === 'closed' && r() })
+    assert.equal((await fnc.send('$Bye')).ok, true)
+    await closed
   } finally {
     fnc.close()
     server.close()

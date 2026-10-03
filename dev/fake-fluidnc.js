@@ -12,10 +12,81 @@ const TICK = 20 // ms
 const HOLD_MS = 200 // how long the fake reports Hold:1 (decelerating) before Hold:0
 const AXES = 'XYZ'
 const MAX_RATE = { X: 9000, Y: 9000, Z: 900 } // mm/min, stock LowRider Jackpot config
+const HOME_MS = 1500
+// Just enough of the stock LowRider config for the app's readers and editors (axes, probe, outputs).
+const CONFIG_YAML = `board: Jackpot TMC2209
+name: LowRider
+
+axes:
+  x:
+    steps_per_mm: 50.000
+    max_rate_mm_per_min: 9000.000
+    acceleration_mm_per_sec2: 200.000
+    max_travel_mm: 1220
+    soft_limits: false
+    homing:
+      cycle: 2
+      positive_direction: false
+      mpos_mm: 3
+    motor0:
+      limit_neg_pin: gpio.25:high
+      pulloff_mm: 4.000
+
+  y:
+    steps_per_mm: 50.000
+    max_rate_mm_per_min: 9000.000
+    acceleration_mm_per_sec2: 200.000
+    max_travel_mm: 2440
+    soft_limits: false
+    homing:
+      cycle: 2
+      positive_direction: false
+      mpos_mm: 3
+    motor0:
+      limit_neg_pin: gpio.33:high
+      pulloff_mm: 4.000
+     #B
+    motor1:
+      limit_neg_pin: gpio.35:high
+      pulloff_mm: 4.000
+
+  z:
+    steps_per_mm: 200.000
+    max_rate_mm_per_min: 900.000
+    acceleration_mm_per_sec2: 80.000
+    max_travel_mm: 300.000
+    soft_limits: false
+    homing:
+      cycle: 1
+      positive_direction: true
+      mpos_mm: 3
+    motor0:
+      limit_pos_pin: gpio.32:high
+      pulloff_mm: 4.000
+    motor1:
+      limit_pos_pin: gpio.34:high
+      pulloff_mm: 4.000
+
+probe:
+  pin: gpio.36:low
+  check_mode_start: true
+
+coolant:
+  flood_pin: gpio.2
+  mist_pin: gpio.16
+
+user_outputs:
+  digital0_pin: gpio.26
+  digital1_pin: gpio.27
+`
 
 export function start(port = 8081) {
   const m = { state: 'Alarm', mpos: [0, 0, 0], wco: [0, 0, 0], ov: [100, 100, 100], moves: [], absolute: true, feed: 1000, speed: 0, spindle: 0 }
   const sd = new Map() // the fake SD card: name -> Buffer
+  const flash = new Map([['config.yaml', Buffer.from(CONFIG_YAML)]]) // the board's flash: config and settings
+  let plateZ = -40 // machine Z of the touch plate's top
+  let touchUntil = 0 // the probe input reads closed until then (the user tapping the plate to the bit)
+  const waiters = [] // G4 replies waiting for motion to finish
   let job = null // { lines, i, pos, size, name } while an SD file runs
   // Like FluidNC 4.x, any number of clients: replies go to the asker, state changes and alarms to everyone.
   const clients = new Set()
@@ -31,6 +102,7 @@ export function start(port = 8081) {
     const feed = moving && m.moves.length ? m.moves[0].feed : 0
     let report = `<${m.state}|MPos:${fmt(m.mpos)}|FS:${feed},${m.spindle}|WCO:${fmt(m.wco)}|Ov:${m.ov.join(',')}`
     if (m.spindle) report += '|A:S'
+    if (Date.now() < touchUntil) report += '|Pn:P'
     if (job) report += `|SD:${Math.min(100, (job.pos / job.size) * 100).toFixed(2)},/sd/${job.name}`
     report += '>'
     if (ws) return send(ws, report)
@@ -44,16 +116,18 @@ export function start(port = 8081) {
     let abs = jog ? true : m.absolute
     let feed = jog ? null : m.feed
     let rapid = false
+    let machineCoords = false
     const from = m.moves.at(-1)?.to ?? m.mpos
     const target = [...from]
     for (const [w, v] of words(text)) {
       if (w === 'G' && v === 90) abs = true
       else if (w === 'G' && v === 91) abs = false
       else if (w === 'G' && v === 0) rapid = true
+      else if (w === 'G' && v === 53) machineCoords = true
       else if (w === 'F') feed = v
       else if (AXES.includes(w)) {
         const i = AXES.indexOf(w)
-        target[i] = abs ? v + m.wco[i] : target[i] + v
+        target[i] = abs ? v + (machineCoords ? 0 : m.wco[i]) : target[i] + v
       }
     }
     if (!jog) {
@@ -86,6 +160,31 @@ export function start(port = 8081) {
   function line(text, ws) {
     const reply = t => send(ws, t)
     const ok = () => reply('ok')
+    const up = text.trim().toUpperCase()
+    if (up === '$CONFIG/FILENAME') { reply('$Config/Filename=config.yaml'); return ok() }
+    const show = /^\$LOCALFS\/SHOW=\/?(.+)$/i.exec(text.trim())
+    if (show) {
+      if (!['Idle', 'Alarm'].includes(m.state)) return reply('error:8')
+      const buf = flash.get(show[1])
+      if (!buf) return reply('error:62')
+      for (const l of buf.toString().replace(/\n$/, '').split('\n')) reply(l)
+      return ok()
+    }
+    if (up === '$BYE') {
+      ok()
+      setTimeout(() => {
+        for (const c of clients) c.close()
+        m.state = 'Idle'; m.mpos = [0, 0, 0]; m.moves = []; m.spindle = 0; job = null
+      }, 100)
+      return
+    }
+    const home = /^\$H([XYZ])$/.exec(up)
+    if (home) {
+      m.state = 'Home'
+      status()
+      setTimeout(() => { m.mpos[AXES.indexOf(home[1])] = 0; m.state = 'Idle'; status(); ok() }, HOME_MS)
+      return
+    }
     const run = /^\s*\$SD\/RUN=\/?(.+?)\s*$/i.exec(text) // file names keep their case
     if (run) {
       if (m.state !== 'Idle') return reply('error:8') // not idle
@@ -109,12 +208,30 @@ export function start(port = 8081) {
     if (l === '$H') {
       m.state = 'Home'
       status()
-      setTimeout(() => { m.mpos = [0, 0, 0]; m.state = 'Idle'; status(); ok() }, 1500)
+      setTimeout(() => { m.mpos = [0, 0, 0]; m.state = 'Idle'; status(); ok() }, HOME_MS)
       return
     }
     const q = /^\$\/AXES\/([XYZ])\/MAX_RATE_MM_PER_MIN$/.exec(l)
     if (q) { reply(`$/axes/${q[1].toLowerCase()}/max_rate_mm_per_min=${MAX_RATE[q[1]].toFixed(3)}`); return ok() }
     if (m.state === 'Alarm') return reply('error:9') // G-code locked out during alarm
+    if (l === 'G90' || l === 'G91') { m.absolute = l === 'G90'; return ok() } // bare mode switches (the probe routine uses them)
+    if (/^G4\b/.test(l)) { waiters.push(ok); return } // answered once motion has finished
+    const probe = /G38\.2/.test(l)
+    if (probe) {
+      const z = words(l).find(([w]) => w === 'Z')?.[1] ?? 0
+      const from = m.moves.at(-1)?.to ?? m.mpos
+      const target = [...from]
+      target[2] = m.absolute ? z + m.wco[2] : from[2] + z
+      const feed = words(l).find(([w]) => w === 'F')?.[1] ?? m.feed
+      m.moves.push({ to: target, feed: Math.min(feed, MAX_RATE.Z), probe: ok })
+      if (m.state === 'Idle') m.state = 'Run'
+      return
+    }
+    for (const [w, v] of words(l)) { // live spindle commands
+      if (w === 'S') m.speed = v
+      else if (w === 'M' && (v === 3 || v === 4)) m.spindle = m.speed || 1000
+      else if (w === 'M' && v === 5) m.spindle = 0
+    }
     if (l.startsWith('$J=')) return motion(l.slice(3), true, ok)
     if (/^G10\s*L20\s*P[01]/.test(l)) {
       for (const [w, v] of words(l.replace(/^G10\s*L20\s*P[01]/, ''))) {
@@ -123,7 +240,7 @@ export function start(port = 8081) {
       status()
       return ok()
     }
-    if (/^(G9[01]\s*)?G[01]\b/.test(l)) return motion(l, false, ok)
+    if (/^(G53\s*)?(G9[01]\s*)?G[01]\b/.test(l)) return motion(l, false, ok)
     ok()
   }
 
@@ -180,11 +297,26 @@ export function start(port = 8081) {
       if (dist <= stepMm) {
         m.mpos = [...mv.to]
         m.moves.shift()
+        if (mv.probe) { // reached the end without touching
+          broadcast(`[PRB:${fmt(m.mpos)}:0]`)
+          broadcast('ALARM:5')
+          m.state = 'Alarm'
+          m.moves = []
+          mv.probe()
+          return status()
+        }
       } else {
         m.mpos = m.mpos.map((p, i) => p + (d[i] / dist) * stepMm)
+        if (mv.probe && m.mpos[2] <= plateZ) { // touched the plate
+          m.mpos[2] = plateZ
+          m.moves.shift()
+          broadcast(`[PRB:${fmt(m.mpos)}:1]`)
+          mv.probe()
+        }
       }
       if (!m.moves.length && !job) { m.state = 'Idle'; status() }
     }
+    if (!m.moves.length) while (waiters.length) waiters.shift()()
     if (ri && (m.state === 'Run' || m.state === 'Jog' || m.state === 'Home') && Date.now() - lastReport >= ri) status()
   }, TICK)
 
@@ -192,8 +324,8 @@ export function start(port = 8081) {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify(body))
   }
-  const listing = () => ({
-    files: [...sd].map(([name, buf]) => ({ name, shortname: name, size: buf.length, datetime: '' })),
+  const listingOf = map => ({
+    files: [...map].map(([name, buf]) => ({ name, shortname: name, size: buf.length, datetime: '' })),
     path: '/',
     total: '1.00 GB',
     used: '0.01 GB',
@@ -202,16 +334,25 @@ export function start(port = 8081) {
   })
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://fake')
+    if (url.pathname === '/fake/touch') { touchUntil = Date.now() + 800; status(); res.writeHead(200); return res.end() }
+    if (url.pathname === '/fake/plate') { plateZ = Number(url.searchParams.get('z')); res.writeHead(200); return res.end() }
+    if (url.pathname === '/files' && req.method === 'POST') {
+      const body = Readable.toWeb(req)
+      const form = await new Request(url, { method: 'POST', headers: { 'content-type': req.headers['content-type'] }, body, duplex: 'half' }).formData()
+      for (const [, v] of form) if (typeof v !== 'string') flash.set(v.name.replace(/^\//, ''), Buffer.from(await v.arrayBuffer()))
+      return json(res, listingOf(flash))
+    }
+    if (url.pathname === '/files') return json(res, listingOf(flash))
     if (url.pathname === '/upload' && req.method === 'POST') {
       const body = Readable.toWeb(req)
       const form = await new Request(url, { method: 'POST', headers: { 'content-type': req.headers['content-type'] }, body, duplex: 'half' }).formData()
       for (const [, v] of form) if (typeof v !== 'string') sd.set(v.name.replace(/^\//, ''), Buffer.from(await v.arrayBuffer()))
-      return json(res, listing())
+      return json(res, listingOf(sd))
     }
     if (url.pathname === '/upload') {
       const name = url.searchParams.get('filename')
       if (url.searchParams.get('action') === 'delete' && name) sd.delete(name)
-      return json(res, listing())
+      return json(res, listingOf(sd))
     }
     const file = url.pathname.startsWith('/sd/') && sd.get(decodeURIComponent(url.pathname.slice(4)))
     if (file) {
@@ -252,5 +393,5 @@ export function start(port = 8081) {
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT ?? 8081)
   start(port)
-  console.log(`Fake FluidNC on ws://localhost:${port}/ (files on http://localhost:${port}/upload)`)
+  console.log(`Fake FluidNC on ws://localhost:${port}/ (files on http://localhost:${port}/upload and /files)`)
 }
