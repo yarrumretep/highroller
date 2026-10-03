@@ -7,4 +7,5 @@
 - **Stream G-code from the browser.** 1.0 runs every job from the SD card.
 - **Z steps/mm calibration.** The Z axis is leadscrew-driven, so its steps/mm follows directly from the screw's pitch.
 - **Wi-Fi and firmware-update screens.** Until then, use the console or FluidNC's web installer.
+- **Move and rename files on the SD card** from the file browser (FluidNC has `action=rename`; moving between folders needs download + upload + delete).
 - **Fun layer**: sounds, a "Jackpot!" animation when a job finishes, job history and stats (hours cut, meters traveled).

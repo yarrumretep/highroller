@@ -2255,9 +2255,9 @@ git commit -m "Replace browser confirm() with an in-app dialog"
 
 **Interfaces:**
 - Paths are relative to the card's root with no leading slash: `''` is the root, `'jobs'` a folder, `'jobs/part.nc'` a file. `job.name` holds the open file's path; FluidNC's `SD:/sd/jobs/part.nc` maps to it through `baseName`.
-- `sdFiles(base)` becomes: `list(dir = '')`, `remove(dir, name, isDir = false)` (FluidNC's `action=delete` / `action=deletedir`), `download(path)`, `upload(file, dir = '', onProgress)`. FluidNC lists a folder with `/upload?path=/jobs/`, deletes `filename` inside `path`, takes the upload's full path from the part's file name (`/jobs/part.nc`), and serves `/sd/jobs/part.nc`. The folder must already exist on the card (no folder creation in the app yet: `ponytail`).
-- `job`: `dir` (the browser's current folder), `files` (that folder's entries). `refresh(dir)`, `upload(file, dir)`, `remove(dir, name, isDir)`, `load(path, size?, text?)` keep their guards from the fix wave (`idleNoJob`, `badName`, overwrite confirmation).
-- `<FileBrowser onclose />`: a `<dialog>` showing the current folder (path line, Up, folders first, then files with sizes), a selected entry, **Open** (loads the selected file and closes), **Upload here** (with progress), **Delete** (asks first), **Close**. Opened from the Job panel's **Open…** button; the panel itself shows only the open file.
+- `sdFiles(base)` becomes: `list(dir = '')`, `mkdir(dir, name)` (FluidNC's `action=createdir`), `remove(dir, name, isDir = false)` (`action=delete` / `action=deletedir`), `download(path)` (text, for the preview), `url(path)` (the `/sd/…` link for saving a copy), `upload(file, dir = '', onProgress)`. FluidNC lists a folder with `/upload?path=/jobs/`, creates and deletes `filename` inside `path`, takes the upload's full path from the part's file name (`/jobs/part.nc`), and serves `/sd/jobs/part.nc`. Moving and renaming files is deferred (TODO).
+- `job`: `dir` (the browser's current folder), `files` (that folder's entries). `refresh(dir)`, `mkdir(dir, name)`, `upload(file, dir)`, `remove(dir, name, isDir)`, `load(path, size?, text?)` keep their guards from the fix wave (`idleNoJob`, `badName`, overwrite confirmation).
+- `<FileBrowser onclose />`: a `<dialog>` showing the current folder (path line, Up, folders first, then files with sizes), a selected entry, **Open** (loads the selected file and closes), **Upload here** (with progress), **New folder** (reveals a name box and a Create button), **Download** (saves a copy of the selected file through the `/sd/…` link; FluidNC 3.x refuses it while the machine moves), **Delete** (asks first), **Close**. Opened from the Job panel's **Open…** button; the panel itself shows only the open file.
 - The fake's SD card gains folders: `GET /upload?path=/&action=createdir&filename=jobs` creates one; listings are per folder; `deletedir` removes a folder and its contents; uploads into a folder that does not exist fail with `"Upload failed"`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -2268,8 +2268,8 @@ test('folders: list, upload into, download from and delete in a folder on the fa
   const server = start(8095)
   try {
     const sd = sdFiles('http://localhost:8095')
-    await fetch('http://localhost:8095/upload?path=%2F&action=createdir&filename=jobs')
-    assert.deepEqual(await sd.list(), [{ name: 'jobs', size: -1, dir: true }])
+    assert.deepEqual(await sd.mkdir('', 'jobs'), [{ name: 'jobs', size: -1, dir: true }])
+    assert.equal(sd.url('jobs/a.nc'), 'http://localhost:8095/sd/jobs/a.nc')
     const form = new FormData() // the same request upload() sends from the browser, into the folder
     form.append('/jobs/a.ncS', '5')
     form.append('myfile', new Blob(['G0 X1']), '/jobs/a.nc')
@@ -2340,6 +2340,8 @@ export function sdFiles(base = '') {
   const dirPath = (dir, name) => '/' + (dir ? dir + '/' : '') + name
   return {
     list: async (dir = '') => parseList(await (await get(`/upload?path=${dirParam(dir)}`)).json()),
+    mkdir: async (dir, name) => parseList(await (await get(`/upload?path=${dirParam(dir)}&action=createdir&filename=${q(name)}`)).json()),
+    url: path => `${base}/sd/${path.split('/').map(q).join('/')}`, // for a download link; 3.x refuses it while moving
     remove: async (dir, name, isDir = false) =>
       parseList(await (await get(`/upload?path=${dirParam(dir)}&action=${isDir ? 'deletedir' : 'delete'}&filename=${q(name)}`)).json()),
     download: async path => (await get(`/sd/${path.split('/').map(q).join('/')}`)).text(),
@@ -2367,7 +2369,7 @@ export function sdFiles(base = '') {
   }
 }
 ```
-and change the header comment's `ponytail:` line to `// ponytail: folders are browsed and used, not created here; make them when copying files onto the card.`
+and change the header comment's `ponytail:` line to `// ponytail: no move or rename yet (TODO).`
 
 - [ ] **Step 5: `src/lib/job.svelte.js`**
 
@@ -2375,6 +2377,8 @@ and change the header comment's `ponytail:` line to `// ponytail: folders are br
 - `refresh(dir = job.dir)`: `job.files = await sd.list(dir); job.dir = dir` (error handling as before).
 - `upload(file, dir = job.dir)`: keep the fix wave's guards; call `sd.upload(file, dir, p => …)`, then `load(dirPath, file.size, await file.text())` where the path is `dir ? `${dir}/${file.name}` : file.name`; the overwrite check looks at `job.files` (the current folder).
 - `remove(dir, name, isDir = false)`: `job.files = await sd.remove(dir, name, isDir)`.
+- `mkdir(dir, name)`: refuse a `badName(name)` or a name containing `/` with `job.error`; otherwise `job.files = await sd.mkdir(dir, name)` (errors into `job.error`).
+- export `sdUrl = path => sd.url(path)` for the browser's Download link.
 - `load(path, size, text)`: unchanged apart from the parameter name; the cache key is the path.
 - `run()`: unchanged (`$SD/Run=/${job.name}` is now a full path).
 
@@ -2384,13 +2388,14 @@ and change the header comment's `ponytail:` line to `// ponytail: folders are br
 <script>
   import { onMount } from 'svelte'
   import { machine } from '../lib/machine.svelte.js'
-  import { job, refresh, load, upload, remove, badName } from '../lib/job.svelte.js'
+  import { job, refresh, load, upload, remove, mkdir, badName, sdUrl } from '../lib/job.svelte.js'
   import { confirm as ask } from '../lib/confirm.svelte.js'
 
   let { onclose } = $props()
   let dialog
   let picker
   let selected = $state(null) // entry in the current folder
+  let newFolder = $state(null) // the name being typed, or null when the box is hidden
   const busy = $derived(machine.conn !== 'open' || machine.status.state !== 'Idle' || job.running || job.upload !== null)
   const entries = $derived([...job.files].sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name)))
   const pathOf = e => (job.dir ? `${job.dir}/${e.name}` : e.name)
@@ -2426,6 +2431,12 @@ and change the header comment's `ponytail:` line to `// ponytail: folders are br
     ev.currentTarget.value = ''
     if (file) upload(file, job.dir)
   }
+  async function create() {
+    const name = newFolder.trim()
+    if (!name) return
+    await mkdir(job.dir, name)
+    if (!job.error) newFolder = null
+  }
 </script>
 
 <dialog bind:this={dialog} oncancel={e => { e.preventDefault(); onclose() }}>
@@ -2444,11 +2455,19 @@ and change the header comment's `ponytail:` line to `// ponytail: folders are br
       <p class="muted">Empty folder.</p>
     {/each}
     {#if job.upload !== null}<progress max="1" value={job.upload}></progress>{/if}
+    {#if newFolder !== null}
+      <div class="newfolder">
+        <input type="text" placeholder="Folder name" bind:value={newFolder} onkeydown={e => { if (e.key === 'Enter') create(); else if (e.key === 'Escape') newFolder = null }} />
+        <button class="go" onclick={create}>Create</button>
+      </div>
+    {/if}
     {#if job.error}<p class="err">{job.error}</p>{/if}
   </section>
   <footer>
     <button disabled={busy} onclick={() => picker.click()}>Upload here</button>
     <input type="file" accept=".nc,.gcode,.ngc,.tap,.cnc,.txt" hidden bind:this={picker} onchange={pick} />
+    <button disabled={busy} onclick={() => (newFolder = newFolder === null ? '' : null)}>New folder</button>
+    {#if selected && !selected.dir}<a class="button" href={sdUrl(pathOf(selected))} download={selected.name}>Download</a>{/if}
     <button disabled={busy || !selected} onclick={del}>Delete</button>
     <button class="go" disabled={busy || !selected || selected.dir || badName(pathOf(selected))} onclick={open}>Open</button>
   </footer>
@@ -2469,6 +2488,11 @@ and change the header comment's `ponytail:` line to `// ponytail: folders are br
   .muted { margin: 0; font-size: 13px; color: var(--muted); }
   .err { margin: 0; color: var(--bad); }
   .go { margin-left: auto; color: white; background: var(--ok); border-color: var(--ok); }
+  .newfolder { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  .newfolder input { min-height: 44px; padding: 0 10px; font-size: 16px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel); }
+  .newfolder .go { margin-left: 0; }
+  a.button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--btn); color: inherit; text-decoration: none; }
+  footer { flex-wrap: wrap; }
   @media (min-width: 900px) { dialog { height: 80vh; max-height: 80vh; margin: 10vh auto; border-radius: 14px; } }
 </style>
 ```
@@ -2492,7 +2516,7 @@ and change the header comment's `ponytail:` line to `// ponytail: folders are br
 
 - [ ] **Step 8: Build, tests, browser check (the controller does the browser part)**
 
-`npm test` (all passing, process exits) and `npm run build` (no new warnings; compile-check FileBrowser.svelte directly). With the fake: create a folder with `curl 'localhost:8081/upload?path=%2F&action=createdir&filename=jobs'`, open the browser, enter `jobs`, upload there, open the file (the panel shows `jobs/<name>`), Run works (`$SD/Run=/jobs/<name>`), the progress follows; Delete asks and removes; Up returns to the root.
+`npm test` (all passing, process exits) and `npm run build` (no new warnings; compile-check FileBrowser.svelte directly). With the fake: open the browser, New folder → `jobs` → Create, enter `jobs`, upload there, open the file (the panel shows `jobs/<name>`), Run works (`$SD/Run=/jobs/<name>`), the progress follows; Download saves a copy; Delete asks and removes; Up returns to the root.
 
 - [ ] **Step 9: Commit**
 
