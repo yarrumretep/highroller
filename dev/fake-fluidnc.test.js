@@ -7,6 +7,14 @@ import { probeZ } from '../src/lib/probe.js'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+// Puts a file on the fake's SD card, the way the app uploads it.
+async function upload(port, name, text) {
+  const form = new FormData()
+  form.append(`/${name}S`, String(Buffer.byteLength(text)))
+  form.append('myfile', new Blob([text]), `/${name}`)
+  assert.equal((await fetch(`http://localhost:${port}/upload`, { method: 'POST', body: form })).status, 200)
+}
+
 test('the app client can unlock, jog and see the new position', async () => {
   const server = start(8099)
   const fnc = new FluidNC({ host: 'localhost:8099' })
@@ -119,9 +127,12 @@ test('probing finds the plate, the probe input can be touched, and a miss alarms
     const r = await probeZ(fnc, { fast: 3000, slow: 600, maxDown: 50 })
     assert.ok(Math.abs(r.z - -40) < 1e-6, `z=${r.z}`)
     await fetch('http://localhost:8093/fake/plate?z=-200', { method: 'POST' })
+    const lines = []
+    fnc.onLine = l => lines.push(l)
     await assert.rejects(probeZ(fnc, { fast: 3000, slow: 600, maxDown: 10 }), /No contact/)
+    assert.ok(lines.includes('ALARM:5'), 'a miss alarms')
     await sleep(100)
-    assert.equal(fnc.status.state, 'Alarm')
+    assert.equal(fnc.status.state, 'Idle') // the routine unlocked to restore G90
   } finally {
     fnc.close()
     server.close()
@@ -175,6 +186,64 @@ test('flash files: show, filename, upload, and $Bye restarts', async () => {
     const closed = new Promise(r => { fnc.onConnection = c => c === 'closed' && r() })
     assert.equal((await fnc.send('$Bye')).ok, true)
     await closed
+  } finally {
+    fnc.close()
+    server.close()
+  }
+})
+
+test('line commands sent during a job wait until its file has been read', async () => {
+  const server = start(8101)
+  const fnc = new FluidNC({ host: 'localhost:8101' })
+  try {
+    // 30 moves of 1 mm at 600 mm/min, 0.1 s each: with 16 read ahead, the whole file has been read after about 1.4 s
+    const moves = Array.from({ length: 30 }, (_, i) => `G1 X${i + 1} F600`)
+    await upload(8101, 'steps.nc', ['G21 G90', ...moves, ''].join('\n'))
+    const opened = new Promise(r => { fnc.onConnection = c => c === 'open' && r() })
+    fnc.connect()
+    await opened
+    assert.equal((await fnc.send('$X')).ok, true)
+    assert.equal((await fnc.send('$RI=0')).ok, true) // no auto-reports: during the job, reports answer the client's ? polls
+    assert.equal((await fnc.send('$SD/Run=/steps.nc')).ok, true)
+    const polled = []
+    fnc.onStatus = s => polled.push(s)
+    const t0 = Date.now()
+    assert.equal((await fnc.send('$X')).ok, true)
+    const waited = Date.now() - t0
+    const at = fnc.status
+    assert.ok(waited > 1000, `answered after ${waited} ms`)
+    assert.ok(polled.some(s => s.state === 'Run' && s.sd), 'real-time ? is still answered during the job')
+    assert.equal(at.sd, null, 'answered only once the whole file had been read')
+    assert.equal(at.state, 'Run', 'which, as on FluidNC, is while the last moves still run')
+    for (let i = 0; i < 60 && fnc.status.state !== 'Idle'; i++) await sleep(50)
+    assert.equal(fnc.status.state, 'Idle')
+    assert.ok(Math.abs(fnc.status.mpos[0] - 30) < 1e-6, `x=${fnc.status.mpos[0]}`)
+  } finally {
+    fnc.close()
+    server.close()
+  }
+})
+
+test('SD: disappears once the file has been read, while the last moves still run', async () => {
+  const server = start(8102)
+  const fnc = new FluidNC({ host: 'localhost:8102' })
+  try {
+    await upload(8102, 'long-end.nc', 'G21 G90\nG1 X1 F3000\nG1 X50 F3000\n') // the last move takes about 1 s
+    const opened = new Promise(r => { fnc.onConnection = c => c === 'open' && r() })
+    fnc.connect()
+    await opened
+    assert.equal((await fnc.send('$X')).ok, true)
+    const reports = []
+    fnc.onStatus = s => reports.push(s)
+    assert.equal((await fnc.send('$SD/Run=/long-end.nc')).ok, true)
+    for (let i = 0; i < 60 && fnc.status.state !== 'Idle'; i++) await sleep(50)
+    const from = reports.findIndex(s => s.state === 'Run')
+    const to = reports.findIndex((s, i) => i > from && s.state === 'Idle')
+    assert.ok(from >= 0 && to > from, 'the job ran and ended')
+    const job = reports.slice(from, to)
+    assert.ok(job.some(s => s.sd), 'SD: while the file was being read')
+    assert.ok(job.some(s => !s.sd && s.mpos[0] < 45), 'Run without SD: while the last move was still cutting')
+    assert.ok(Math.abs(fnc.status.mpos[0] - 50) < 1e-6, `x=${fnc.status.mpos[0]}`)
   } finally {
     fnc.close()
     server.close()

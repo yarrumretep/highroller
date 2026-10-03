@@ -1,16 +1,17 @@
 // Parses FluidNC status reports, e.g.
 // <Idle|MPos:1.000,2.000,3.000|FS:0,0|WCO:0.000,0.000,0.000|Ov:100,100,100|A:SF|Pn:P|SD:12.50,/sd/job.nc>
-// WCO and Ov (with A) only come now and then, so they carry over from the previous report.
+// WCO and Ov (with A) only come now and then, so they carry over from the previous report;
+// until the first one they are null (unknown), and so is the position that needs WCO.
 
 export const EMPTY = {
   state: 'Unknown',
   sub: null,
   mpos: [0, 0, 0],
-  wpos: [0, 0, 0],
-  wco: [0, 0, 0],
+  wpos: null,
+  wco: null,
   feed: 0,
   spindle: 0,
-  ov: [100, 100, 100],
+  ov: null,
   acc: '',
   pins: '',
   sd: null,
@@ -36,12 +37,19 @@ export function parseStatus(line, prev = EMPTY) {
     else if (key === 'A') s.acc = val
     else if (key === 'Pn') s.pins = val
     else if (key === 'SD') {
-      // "12.50,/sd/job.nc" while running; " <name>: Sent" once FluidNC has read the whole file
-      const c = val.indexOf(',')
-      s.sd = c < 0 ? { percent: 100, file: val.replace(/: Sent$/, '').trim() } : { percent: Number(val.slice(0, c)), file: val.slice(c + 1) }
+      // "12.50,/sd/job.nc" while reading the file; " <name>: Sent" at its very end (names may hold commas)
+      if (/: Sent$/.test(val)) s.sd = { percent: 100, file: val.replace(/: Sent$/, '').trim() }
+      else {
+        const c = val.indexOf(',')
+        s.sd = { percent: Number(val.slice(0, c)), file: val.slice(c + 1) }
+      }
     }
   }
-  if (pos) {
+  if (pos && !s.wco) {
+    // No work offset seen yet: only the kind of position this report gave is known
+    s.mpos = isWork ? null : pos
+    s.wpos = isWork ? pos : null
+  } else if (pos) {
     const wco = pos.map((_, k) => s.wco[k] ?? 0)
     s.mpos = isWork ? pos.map((v, k) => v + wco[k]) : pos
     s.wpos = isWork ? pos : pos.map((v, k) => v - wco[k])

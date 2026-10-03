@@ -14,10 +14,11 @@ const done = req =>
     req.onerror = () => reject(req.error)
   })
 
+// Each operation closes its connection again; close() lets the transaction finish first.
 export async function cacheGet(name) {
   try {
     const db = await open()
-    const hit = await done(db.transaction('jobs').objectStore('jobs').get('last'))
+    const hit = await done(db.transaction('jobs').objectStore('jobs').get('last')).finally(() => db.close())
     return hit?.name === name ? hit : null
   } catch {
     return null
@@ -27,6 +28,6 @@ export async function cacheGet(name) {
 export async function cachePut(name, text) {
   try {
     const db = await open()
-    await done(db.transaction('jobs', 'readwrite').objectStore('jobs').put({ name, size: new Blob([text]).size, text }, 'last'))
+    await done(db.transaction('jobs', 'readwrite').objectStore('jobs').put({ name, size: new Blob([text]).size, text }, 'last')).finally(() => db.close())
   } catch {}
 }

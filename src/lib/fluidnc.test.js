@@ -159,14 +159,15 @@ test('dropQueued cancels matching commands that have not been sent', async t => 
   assert.equal((await g).ok, true)
 })
 
-test('quiet commands keep their output out of onLine, except alarms', async t => {
+test('quiet commands keep their output out of onLine, except alarms and messages', async t => {
   const { fnc, ws, events } = setup(t)
   ws().open()
   ws().rx('ok\n') // answers $RI=100, which is not quiet
   const p = fnc.send('$/axes/z/max_rate_mm_per_min', { quiet: true })
-  ws().rx('$/axes/z/max_rate_mm_per_min=900.000\nALARM:1\nok\n')
-  assert.deepEqual((await p).lines, ['$/axes/z/max_rate_mm_per_min=900.000', 'ALARM:1'])
-  assert.deepEqual(events.lines, ['ok', 'ALARM:1'])
+  const banner = "Grbl 3.9 [FluidNC v3.9.9 (wifi) '$' for help]"
+  ws().rx(`$/axes/z/max_rate_mm_per_min=900.000\nALARM:1\n[MSG:ERR: Bad GCode]\n${banner}\nok\n`)
+  assert.deepEqual((await p).lines, ['$/axes/z/max_rate_mm_per_min=900.000', 'ALARM:1', '[MSG:ERR: Bad GCode]', banner])
+  assert.deepEqual(events.lines, ['ok', 'ALARM:1', '[MSG:ERR: Bad GCode]', banner])
 })
 
 test('hold, resume and jogCancel send their real-time bytes', t => {

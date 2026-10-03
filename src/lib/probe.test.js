@@ -3,13 +3,19 @@ import assert from 'node:assert/strict'
 import { probeZ } from './probe.js'
 
 // A fake FluidNC that answers each G38.2 with the next contact height (machine Z), or no contact.
+// After a miss it is in alarm, like FluidNC: G-code is refused (error:9) until $X.
 function fakeFnc(contacts) {
-  const f = { sent: [] }
+  const f = { sent: [], alarm: false }
   f.send = line => {
     f.sent.push(line)
+    if (line === '$X') f.alarm = false
+    if (f.alarm) return Promise.resolve({ ok: false, error: 9, lines: [] })
     if (!line.includes('G38.2')) return Promise.resolve({ ok: true, error: null, lines: [] })
     const z = contacts.shift()
-    if (z === undefined) return Promise.resolve({ ok: true, error: null, lines: ['[PRB:0.000,0.000,-19.000:0]', 'ALARM:5'] }) // what FluidNC really sends
+    if (z === undefined) {
+      f.alarm = true
+      return Promise.resolve({ ok: true, error: null, lines: ['[PRB:0.000,0.000,-19.000:0]', 'ALARM:5'] }) // what FluidNC really sends
+    }
     return Promise.resolve({ ok: true, error: null, lines: [`[PRB:10.000,20.000,${z.toFixed(3)}:1]`] })
   }
   return f
@@ -40,10 +46,10 @@ test('rejects touches that disagree by more than the tolerance', async () => {
   assert.equal(f.sent.at(-1), 'G90')
 })
 
-test('no contact stops at once with a clear error', async () => {
+test('no contact stops at once with a clear error, and unlocks to restore G90', async () => {
   const f = fakeFnc([])
   await assert.rejects(probeZ(f), /No contact/)
-  assert.deepEqual(f.sent, ['G91', 'G38.2 Z-20 F300', 'G90'])
+  assert.deepEqual(f.sent, ['G91', 'G38.2 Z-20 F300', 'G90', '$X', 'G90'])
 })
 
 test('options change the feeds, distances and touch count', async () => {

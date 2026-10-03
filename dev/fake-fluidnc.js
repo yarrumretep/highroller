@@ -1,7 +1,8 @@
 // A pretend FluidNC for UI work without the machine. It speaks just enough of the protocol:
 // binary output frames, status reports, jogging, G0/G1 moves, work offsets, overrides, alarms,
-// SD files over HTTP (/upload, /sd/<name>) and running them with $SD/Run.
-// ponytail: grows only as features need it; job arcs run as straight lines and G20 is ignored.
+// SD files over HTTP (/upload, /sd/<name>) and running them with $SD/Run, the way 3.9.9 does:
+// lines from clients wait while a job's file is being read, and SD: goes once the file has been read.
+// ponytail: grows only as features need it; job arcs run as straight lines, G20 and M2/M30 are ignored.
 import { createServer } from 'node:http'
 import { Readable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
@@ -13,9 +14,12 @@ const HOLD_MS = 200 // how long the fake reports Hold:1 (decelerating) before Ho
 const AXES = 'XYZ'
 const MAX_RATE = { X: 9000, Y: 9000, Z: 900 } // mm/min, stock LowRider Jackpot config
 const HOME_MS = 1500
+const PLANNER_BLOCKS = 16 // moves a job's file is read ahead of the motion (FluidNC's default planner_blocks)
+const REFRESH = 10 // like FluidNC, WCO and Ov come in every 10th report (and in the next one after a change)
 // Just enough of the stock LowRider config for the app's readers and editors (axes, probe, outputs).
 const CONFIG_YAML = `board: Jackpot TMC2209
 name: LowRider
+planner_blocks: 16
 
 axes:
   x:
@@ -87,11 +91,13 @@ export function start(port = 8081) {
   let plateZ = -40 // machine Z of the touch plate's top
   let touchUntil = 0 // the probe input reads closed until then (the user tapping the plate to the bit)
   const waiters = [] // G4 replies waiting for motion to finish
-  let job = null // { lines, i, pos, size, name } while an SD file runs
+  let job = null // { lines, i, pos, size, name } while an SD file is being read
+  let pendingLines = [] // [text, ws]: lines from clients, which FluidNC only reads once the job's file has been read
   // Like FluidNC 4.x, any number of clients: replies go to the asker, state changes and alarms to everyone.
   const clients = new Set()
   let ri = 0 // ponytail: one shared report interval; FluidNC keeps one per client
   let lastReport = 0
+  let wcoIn = 0, ovIn = 0 // reports until WCO / Ov are included again (0: the next one), shared like FluidNC's counters
   let wifi = 70 // simulated signal %, wanders a little
 
   const send = (ws, text) => ws.send(Buffer.from(text + '\r\n'), { binary: true })
@@ -100,9 +106,17 @@ export function start(port = 8081) {
   const status = ws => {
     const moving = m.state === 'Run' || m.state === 'Jog'
     const feed = moving && m.moves.length ? m.moves[0].feed : 0
-    let report = `<${m.state}|MPos:${fmt(m.mpos)}|FS:${feed},${m.spindle}|WCO:${fmt(m.wco)}|Ov:${m.ov.join(',')}`
-    if (m.spindle) report += '|A:S'
+    let report = `<${m.state}|MPos:${fmt(m.mpos)}|FS:${feed},${m.spindle}`
     if (Date.now() < touchUntil) report += '|Pn:P'
+    if (wcoIn-- <= 0) {
+      wcoIn = REFRESH - 1
+      report += `|WCO:${fmt(m.wco)}`
+    }
+    if (ovIn-- <= 0) {
+      ovIn = REFRESH - 1
+      report += `|Ov:${m.ov.join(',')}`
+      if (m.spindle) report += '|A:S'
+    }
     if (job) report += `|SD:${Math.min(100, (job.pos / job.size) * 100).toFixed(2)},/sd/${job.name}`
     report += '>'
     if (ws) return send(ws, report)
@@ -187,11 +201,11 @@ export function start(port = 8081) {
     }
     const run = /^\s*\$SD\/RUN=\/?(.+?)\s*$/i.exec(text) // file names keep their case
     if (run) {
-      if (m.state !== 'Idle') return reply('error:8') // not idle
+      if (m.state === 'Alarm') return reply('error:8') // FluidNC refuses a run only in alarm
       const buf = sd.get(run[1])
       if (!buf) return reply('error:62') // could not open the file
       job = { lines: buf.toString().split('\n'), i: 0, pos: 0, size: buf.length, name: run[1] }
-      m.state = 'Run'
+      if (m.state === 'Idle') m.state = 'Run' // otherwise its moves just join those still queued
       status()
       return ok()
     }
@@ -203,8 +217,11 @@ export function start(port = 8081) {
       reply(`Signal: ${Math.round(wifi)}%`)
       return ok()
     }
-    if (l.startsWith('$RI=')) { ri = Number(l.slice(4)); status(ws); return ok() }
-    if (l === '$X') { m.state = 'Idle'; status(); reply('[MSG:INFO: Caution: Unlocked]'); return ok() }
+    if (l.startsWith('$RI=')) { ri = Number(l.slice(4)); wcoIn = ovIn = 0; status(ws); return ok() } // a full report follows $RI
+    if (l === '$X') { // unlocks only an alarm; otherwise just ok, as FluidNC does
+      if (m.state === 'Alarm') { m.state = 'Idle'; status(); reply('[MSG:INFO: Caution: Unlocked]') }
+      return ok()
+    }
     if (l === '$H') {
       m.state = 'Home'
       status()
@@ -237,6 +254,7 @@ export function start(port = 8081) {
       for (const [w, v] of words(l.replace(/^G10\s*L20\s*P[01]/, ''))) {
         if (AXES.includes(w)) m.wco[AXES.indexOf(w)] = m.mpos[AXES.indexOf(w)] - v
       }
+      wcoIn = 0 // the new offset goes out in the next report
       status()
       return ok()
     }
@@ -255,11 +273,12 @@ export function start(port = 8081) {
       }
       return status()
     }
-    if (c === '~') { if (m.state.startsWith('Hold')) m.state = 'Run'; return status() }
+    if (c === '~') { if (m.state === 'Hold:0') m.state = 'Run'; return status() } // ignored until the hold is complete
     if (code === 0x18) {
       const wasMoving = m.state === 'Run' || m.state === 'Jog' || m.state === 'Hold:1'
       m.moves = []
       job = null
+      pendingLines = [] // a reset flushes what clients sent, as FluidNC does
       m.spindle = 0
       if (m.state !== 'Alarm') m.state = wasMoving ? 'Alarm' : 'Idle'
       broadcast("Grbl 3.9 [FluidNC fake, '$' for help]")
@@ -273,21 +292,25 @@ export function start(port = 8081) {
       0x95: [f, 100, s], 0x96: [f, 50, s], 0x97: [f, 25, s],
       0x99: [f, r, 100], 0x9a: [f, r, s + 10], 0x9b: [f, r, s - 10], 0x9c: [f, r, s + 1], 0x9d: [f, r, s - 1],
     }[code]
-    if (ov) m.ov = [clamp(ov[0], 10, 200), ov[1], clamp(ov[2], 10, 200)]
+    if (ov) {
+      m.ov = [clamp(ov[0], 10, 200), ov[1], clamp(ov[2], 10, 200)]
+      ovIn = 0 // the change goes out in the next report
+    }
   }
 
   const timer = setInterval(() => {
-    // Read a running SD job a few moves ahead, like FluidNC filling its planner from the file
-    while (job && m.state === 'Run' && m.moves.length < 4 && job.i < job.lines.length) {
+    // Read a running SD job up to planner_blocks moves ahead, like FluidNC filling its planner from the file
+    while (job && m.state === 'Run' && m.moves.length < PLANNER_BLOCKS && job.i < job.lines.length) {
       const text = job.lines[job.i++]
       job.pos += Buffer.byteLength(text) + 1
       jobLine(text)
     }
-    if (job && job.i >= job.lines.length && !m.moves.length && m.state === 'Run') {
-      job = null
-      m.state = 'Idle'
+    if (job && job.i >= job.lines.length) {
+      job = null // the whole file has been read: SD: goes now, while the last moves are still being cut
+      if (!m.moves.length) m.state = 'Idle' // a file without moves
       status()
     }
+    while (!job && pendingLines.length) line(...pendingLines.shift()) // in order, until one starts another job
     const mv = m.moves[0]
     if (mv && (m.state === 'Run' || m.state === 'Jog')) {
       const pct = mv.jog ? 100 : mv.rapid ? m.ov[1] : m.ov[0]
@@ -371,11 +394,17 @@ export function start(port = 8081) {
     ws.on('message', data => {
       for (const c of data.toString()) { // UTF-8 decoded: override bytes arrive as single characters
         if ('?!~\x18'.includes(c) || c.codePointAt(0) >= 0x80) realtime(c, ws)
-        else if (c === '\n') { line(buf, ws); buf = '' }
-        else if (c !== '\r') buf += c
+        else if (c === '\n') {
+          if (job || pendingLines.length) pendingLines.push([buf, ws]) // a job's file is being read: lines wait
+          else line(buf, ws)
+          buf = ''
+        } else if (c !== '\r') buf += c
       }
     })
-    ws.on('close', () => clients.delete(ws))
+    ws.on('close', () => {
+      clients.delete(ws)
+      pendingLines = pendingLines.filter(([, w]) => w !== ws) // its waiting lines go with it
+    })
   })
   server.listen(port)
 

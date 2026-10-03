@@ -34,7 +34,7 @@ export class FluidNC {
 
   // Resolves with { ok, error, lines } when FluidNC answers ok or error:N. Never rejects.
   // Refuses at once when not connected, so motion is never queued for later.
-  // quiet: the app's own queries; their output stays out of onLine (alarms still go through).
+  // quiet: the app's own queries; their output stays out of onLine (alarms, messages and the reset banner still go through).
   send(line, { quiet = false } = {}) {
     if (this.ws?.readyState !== OPEN) return Promise.resolve({ ok: false, error: 'disconnected', lines: [] })
     return new Promise(resolve => {
@@ -136,7 +136,7 @@ export class FluidNC {
       return
     }
     const c = this.inflight
-    if (!c?.quiet || line.startsWith('ALARM:')) this.onLine(line)
+    if (!c?.quiet || /^(ALARM:|\[MSG:|Grbl )/.test(line)) this.onLine(line)
     if (!c) return
     if (line === 'ok' || line.startsWith('error:')) {
       this.inflight = null

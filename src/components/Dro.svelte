@@ -9,9 +9,9 @@
   {#each AXES as axis, i}
     <div class="row">
       <span class="axis">{axis}</span>
-      <span class="work mono">{machine.status.wpos[i]?.toFixed(3)}</span>
-      <span class="mach mono" title="Machine position">{machine.status.mpos[i]?.toFixed(3)}</span>
-      <button disabled={!idle} onclick={() => send(`G10 L20 P0 ${axis}0`)}>Zero</button>
+      <span class="work mono">{machine.status.wpos?.[i]?.toFixed(3) ?? '–.---'}</span>
+      <span class="mach mono" title="Machine position">{machine.status.mpos?.[i]?.toFixed(3) ?? '–.---'}</span>
+      <button disabled={!idle || !machine.status.wpos} onclick={() => send(`G10 L20 P0 ${axis}0`)}>Zero</button>
     </div>
   {/each}
 </div>

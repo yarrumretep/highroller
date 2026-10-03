@@ -1,6 +1,6 @@
 // Which segment of a running job is being cut, and how long is left.
 const ON_PATH_MM = 0.05 // closer than this counts as "on the segment"
-const PLANNER_LINES = 64 // FluidNC queues at most planner_blocks (32) lines beyond what is executing; doubled for margin
+const PLANNER_LINES = 64 // FluidNC queues at most planner_blocks (16 by default, up to 120) lines beyond what is executing; 4x the default for margin
 const WINDOW = 5000 // ponytail: segments scanned per report; if the tool jumped further the trail lags, then catches up
 
 function distToSegment(p, i, [x, y, z]) {
@@ -57,13 +57,14 @@ export function along(job, i, [x, y, z]) {
 const LEARN_AFTER_S = 30
 const SMOOTH = 0.1
 
-export function progress(job, i, u, elapsed, ratio) {
+export function progress(job, i, u, elapsed, ratio, prevDone = 0) {
   const total = job.time.at(-1) ?? 0
   const start = i > 0 ? job.time[i - 1] : 0
-  const done = i < 0 ? 0 : start + u * (job.time[i] - start)
+  const raw = i < 0 ? 0 : start + u * (job.time[i] - start)
+  const done = Math.max(raw, prevDone) // progress never runs backwards
   if (done > LEARN_AFTER_S && elapsed > 0) {
     const r = elapsed / done
     ratio = ratio == null ? r : ratio + SMOOTH * (r - ratio)
   }
-  return { fraction: total ? done / total : 0, left: Math.max(0, (total - done) * (ratio ?? 1)), ratio, learning: ratio == null }
+  return { fraction: total ? done / total : 0, left: Math.max(0, (total - done) * (ratio ?? 1)), ratio, learning: ratio == null, done }
 }

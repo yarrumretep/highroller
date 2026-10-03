@@ -51,6 +51,7 @@ Details below were checked against FluidNC's source code, versions 3.9.9 and 4.1
 **Commands**
 - One line is sent at a time. The next line goes out only after FluidNC replies `ok` or `error:N`.
 - `send(line)` returns a promise that settles with that reply.
+- While an SD job runs, FluidNC reads lines only from the file: the app's own queries wait for idle; real-time bytes still work.
 
 **Real-time bytes** are single bytes FluidNC acts on immediately. They skip the queue:
 
@@ -69,7 +70,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 - The app turns on auto-reporting with `$RI=100`, which gives 10 reports a second.
 - FluidNC only auto-reports while the machine moves or when something changes. So whenever nothing has arrived for 250 ms, the app sends `?`.
 - If nothing at all arrives for 3 s, the app treats the link as dead and reconnects. That also covers a phone waking from sleep.
-- Fields parsed: `State` (including `Hold:0`/`Hold:1`), `SD` (`<percent>,<path>` while running; `<name>: Sent` once the whole file has been read), `MPos` or `WPos` (depending on FluidNC's `$10` setting), `WCO`, `FS`, `Ov`, `Pn`, `A`.
+- Fields parsed: `State` (including `Hold:0`/`Hold:1`), `SD` (`<percent>,<path>` while FluidNC is reading the file; the field disappears once the whole file has been read, while the last moves are still cutting, so the app keeps following a running job until the state returns to Idle), `MPos` or `WPos` (depending on FluidNC's `$10` setting), `WCO`, `FS`, `Ov`, `Pn`, `A`.
 - `WCO` (work offset) and `Ov` (overrides) only appear in some reports, so their last values are cached. `A` (spindle and coolant state) only appears alongside `Ov`.
 - Work position: WPos = MPos − WCO. If the report gives WPos instead, MPos = WPos + WCO.
 
@@ -171,7 +172,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 **Trail**
 1. Multiply the `SD:` percentage by the file size to get a byte position.
 2. Find the segment at that byte position with a binary search.
-3. FluidNC reads the file ahead of the actual motion, so search backwards from that segment for the one closest to the live position.
+3. FluidNC reads the file ahead of the actual motion, so walk forward from the last segment to the first one the tool is on, bounded by the planner depth.
 4. Every segment up to that one is done. Done segments with Z < 0 are drawn red.
 5. The trail never moves backwards.
 

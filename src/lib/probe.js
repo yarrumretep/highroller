@@ -35,6 +35,11 @@ export async function probeZ(fnc, opts = {}) {
     const z = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
     return { z, spread, touches }
   } finally {
-    await quiet('G90')
+    // After a miss FluidNC is in alarm and refuses G-code until unlocked
+    const r = await quiet('G90')
+    if (!r.ok) {
+      await quiet('$X')
+      await quiet('G90')
+    }
   }
 }

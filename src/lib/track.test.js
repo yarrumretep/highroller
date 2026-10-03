@@ -37,6 +37,13 @@ test('progress by time, within the current segment', () => {
   assert.equal(p.learning, true)
 })
 
+test('progress never runs backwards when the position along a segment shrinks', () => {
+  const p = progress(line10, 2, 0.2, 0, null, 2.5) // 2.2 s by position, but 2.5 s was already shown
+  assert.equal(p.done, 2.5)
+  assert.equal(p.fraction, 0.25)
+  assert.equal(progress(line10, 2, 0.5, 0, null, 2.2).done, 2.5) // and it moves on once the tool is past it
+})
+
 test('before any motion there is no progress and the raw estimate is the time left', () => {
   const p = progress(line10, -1, 0, 0, null)
   assert.deepEqual([p.fraction, p.left], [0, 10])

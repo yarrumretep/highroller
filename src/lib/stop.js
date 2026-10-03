@@ -6,8 +6,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 export async function stopMachine(fnc, jogger) {
   jogger.stop()
   fnc.hold()
-  await sleep(150) // let a fresh report arrive: motion may have started since the last one
-  const t0 = Date.now()
-  while (moving(fnc.status) && Date.now() - t0 < 2000) await sleep(50) // a full-speed rapid takes ~0.75 s to stop
-  fnc.reset()
+  try {
+    await sleep(150) // let a fresh report arrive: motion may have started since the last one
+    const t0 = Date.now()
+    while (moving(fnc.status) && Date.now() - t0 < 2000) await sleep(50) // a full-speed rapid takes ~0.75 s to stop
+  } finally {
+    fnc.reset() // once the hold has been sent, the reset always follows
+  }
 }

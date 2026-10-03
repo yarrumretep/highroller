@@ -62,6 +62,33 @@ test('a file FluidNC has finished reading reports 100 %', () => {
   assert.deepEqual(s.sd, { percent: 100, file: '/sd/job.nc' })
 })
 
+test('a comma in the file name stays part of the name', () => {
+  assert.deepEqual(parseStatus('<Run|MPos:0,0,0|FS:0,0|SD:12.50,/sd/a,b.nc>').sd, { percent: 12.5, file: '/sd/a,b.nc' })
+  assert.deepEqual(parseStatus('<Run|MPos:0,0,0|FS:0,0|SD: /sd/a,b.nc: Sent>').sd, { percent: 100, file: '/sd/a,b.nc' })
+})
+
+test('before any WCO the work position is unknown, and only the reported position is known', () => {
+  const a = parseStatus('<Idle|MPos:1,2,3|FS:0,0>')
+  assert.equal(a.wco, null)
+  assert.equal(a.wpos, null)
+  assert.deepEqual(a.mpos, [1, 2, 3])
+  const b = parseStatus('<Idle|WPos:4,5,6|FS:0,0>')
+  assert.deepEqual(b.wpos, [4, 5, 6])
+  assert.equal(b.mpos, null)
+  const c = parseStatus('<Idle|MPos:1,2,3|FS:0,0|WCO:1,1,1>', a)
+  assert.deepEqual(c.wpos, [0, 1, 2])
+  assert.deepEqual(parseStatus('<Idle|MPos:2,2,2|FS:0,0>', c).wpos, [1, 1, 1]) // known from then on
+})
+
+test('overrides are unknown until a report carries Ov', () => {
+  const a = parseStatus('<Run|MPos:0,0,0|FS:0,0>')
+  assert.equal(a.ov, null)
+  const b = parseStatus('<Run|MPos:0,0,0|FS:0,0|Ov:110,100,100|A:S>', a)
+  assert.deepEqual(b.ov, [110, 100, 100])
+  assert.equal(b.acc, 'S')
+  assert.deepEqual(parseStatus('<Run|MPos:0,0,0|FS:0,0>', b).ov, [110, 100, 100])
+})
+
 test('wifiPercent reads the Signal line of $System/Stats, or null without one', () => {
   assert.equal(wifiPercent(['Current WiFi Mode: STA', 'Signal: 78%', 'Hostname: fluidnc']), 78)
   assert.equal(wifiPercent(['Current WiFi Mode: AP']), null)

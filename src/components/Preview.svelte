@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
 
-  // job: parsed G-code or null; current: index of the segment being cut (-1 = none); pos: live work position
+  // job: parsed G-code or null; current: index of the segment being cut (-1 = none); pos: live work position (null = not known yet)
   let { job = null, current = -1, pos = [0, 0, 0] } = $props()
 
   let box, base, trail, dot
@@ -60,6 +60,7 @@
   function drawDot() {
     const ctx = ctxOf(dot)
     ctx.clearRect(0, 0, size.w, size.h)
+    if (!pos) return // no tool to draw until the work offset is known
     const below = pos[2] < 0
     const x = sx(pos[0]), y = sy(pos[1])
     if (job && current >= 0 && below) {

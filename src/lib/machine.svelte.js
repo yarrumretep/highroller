@@ -13,6 +13,7 @@ export const machine = $state({
   log: [],
   maxRate: { X: Infinity, Y: Infinity, Z: Infinity },
   stops: 0,
+  stopping: false,
   wifi: null,
 })
 
@@ -21,8 +22,20 @@ function log(line) {
   if (machine.log.length > LOG_MAX) machine.log.splice(0, machine.log.length - LOG_MAX)
 }
 
+// FluidNC does not read lines from the app while an SD job runs, so the app's own queries wait for idle.
+const whenIdle = []
+const idle = s => s.state === 'Idle' && !s.sd
+function runWhenIdle(fn) {
+  whenIdle.push(fn)
+  if (idle(machine.status)) flushIdle()
+}
+function flushIdle() {
+  while (whenIdle.length) whenIdle.shift()()
+}
+
 const WIFI_POLL_MS = 15000
 let wifiTimer
+let wifiPending = false
 
 export const fnc = new FluidNC({
   // On the board, talk to the board. Dev server: VITE_FLUIDNC_HOST, or the fake on :8081.
@@ -30,6 +43,7 @@ export const fnc = new FluidNC({
   onStatus: s => {
     machine.status = s
     if (s.state !== 'Alarm') machine.alarm = null
+    if (idle(s)) flushIdle()
   },
   onLine: line => {
     const m = /^ALARM:(\d+)/.exec(line)
@@ -43,8 +57,8 @@ export const fnc = new FluidNC({
     if (c === 'open') {
       machine.everOpen = true
       fnc.jogCancel() // cancel any jog left running from before the link dropped
-      readMaxRates()
-      readWifi()
+      runWhenIdle(readMaxRates)
+      runWhenIdle(readWifi)
       wifiTimer = setInterval(readWifi, WIFI_POLL_MS)
     }
   },
@@ -61,8 +75,12 @@ async function readMaxRates() {
 }
 
 // The signal at the controller is what matters for a link dropping mid-job (the phone shows its own).
+// Polled only while idle, one poll at a time: during a job the last reading stays.
 async function readWifi() {
+  if (!idle(machine.status) || wifiPending) return
+  wifiPending = true
   const r = await fnc.send('$System/Stats', { quiet: true })
+  wifiPending = false
   if (r.ok) machine.wifi = wifiPercent(r.lines)
 }
 
@@ -78,5 +96,10 @@ export async function send(line) {
 
 export async function stop() {
   machine.stops++ // JogPad cancels any press still waiting to become a hold
-  await stopMachine(fnc, jogger)
+  machine.stopping = true // Pause and Resume stay off until the reset is out
+  try {
+    await stopMachine(fnc, jogger)
+  } finally {
+    machine.stopping = false
+  }
 }

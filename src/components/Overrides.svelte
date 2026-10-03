@@ -2,19 +2,29 @@
   import { machine, fnc } from '../lib/machine.svelte.js'
   import { overrideBytes, RAPID } from '../lib/overrides.js'
 
-  const ov = $derived(machine.status.ov)
-  const live = $derived(machine.conn === 'open')
+  const ov = $derived(machine.status.ov ?? [100, 100, 100])
+  const live = $derived(machine.conn === 'open' && !!machine.status.ov) // unknown until a report carries Ov
 
-  function set(kind, from, to) {
-    for (const b of overrideBytes(kind, from, to)) fnc.realtime(b)
+  // Ov comes in only every 10th report or so: step from the last target until a report shows it.
+  const targets = { feed: null, spindle: null }
+  function set(kind, to) {
+    const idx = kind === 'feed' ? 0 : 2
+    const from = targets[kind] ?? ov[idx]
+    const bytes = overrideBytes(kind, from, to)
+    for (const b of bytes) fnc.realtime(b)
+    targets[kind] = Math.min(200, Math.max(10, Math.round(to)))
   }
+  $effect(() => {
+    if (ov[0] === targets.feed) targets.feed = null
+    if (ov[2] === targets.spindle) targets.spindle = null
+  })
 </script>
 
 <div class="panel ov">
   <label>
     <span>Feed</span>
-    <input type="range" min="10" max="200" value={ov[0]} disabled={!live} onchange={e => set('feed', ov[0], +e.currentTarget.value)} />
-    <button class="mono" title="Back to 100 %" disabled={!live} onclick={() => set('feed', ov[0], 100)}>{ov[0]}%</button>
+    <input type="range" min="10" max="200" value={ov[0]} disabled={!live} onchange={e => set('feed', +e.currentTarget.value)} />
+    <button class="mono" title="Back to 100 %" disabled={!live} onclick={() => set('feed', 100)}>{ov[0]}%</button>
   </label>
   <div class="rapid">
     <span>Rapid</span>
@@ -25,8 +35,8 @@
   <!-- ponytail: shown for every spindle; build step 4 hides it for on/off relay spindles once it reads the config -->
   <label>
     <span>Spindle</span>
-    <input type="range" min="10" max="200" value={ov[2]} disabled={!live} onchange={e => set('spindle', ov[2], +e.currentTarget.value)} />
-    <button class="mono" title="Back to 100 %" disabled={!live} onclick={() => set('spindle', ov[2], 100)}>{ov[2]}%</button>
+    <input type="range" min="10" max="200" value={ov[2]} disabled={!live} onchange={e => set('spindle', +e.currentTarget.value)} />
+    <button class="mono" title="Back to 100 %" disabled={!live} onclick={() => set('spindle', 100)}>{ov[2]}%</button>
   </label>
 </div>
 
