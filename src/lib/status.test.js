@@ -55,6 +55,7 @@ test('does not mutate the previous status', () => {
   assert.deepEqual(a.mpos, [1, 1, 1])
   assert.deepEqual(a.wco, [0, 0, 0])
   assert.equal(EMPTY.state, 'Unknown')
+  assert.equal(EMPTY.mpos, null)
 })
 
 test('a file FluidNC has finished reading reports 100 %', () => {
@@ -68,6 +69,7 @@ test('a comma in the file name stays part of the name', () => {
 })
 
 test('before any WCO the work position is unknown, and only the reported position is known', () => {
+  assert.equal(parseStatus('<Idle|FS:0,0>').mpos, null) // no position field at all yet: unknown, not a stale zero
   const a = parseStatus('<Idle|MPos:1,2,3|FS:0,0>')
   assert.equal(a.wco, null)
   assert.equal(a.wpos, null)

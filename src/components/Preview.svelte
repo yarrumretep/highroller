@@ -127,13 +127,16 @@
     range
     if (size.w) fit()
   })
-  // A changed work offset moves the drawn toolpath (only when the values really changed: the array is renewed often).
+  // A changed work offset moves the drawn toolpath (only when the values really changed: the array is
+  // renewed often, e.g. whenever FluidNC happens to resend WCO with the same numbers). In job-fit mode
+  // the camera is anchored to the job's shifted bounds, so a real change there refits too, not just redraws.
   let drawnWco = null
   $effect(() => {
     const w = wco ? wco.join(',') : null
     if (size.w && w !== drawnWco) {
       drawnWco = w
-      redraw()
+      if (fitMode === 'job') fit()
+      else redraw()
     }
   })
   // Progress: add newly finished segments to the trail (or start over if it went backwards).

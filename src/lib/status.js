@@ -6,7 +6,7 @@
 export const EMPTY = {
   state: 'Unknown',
   sub: null,
-  mpos: [0, 0, 0],
+  mpos: null,
   wpos: null,
   wco: null,
   feed: 0,
