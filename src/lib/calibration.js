@@ -36,7 +36,7 @@ export async function calibrate(io) {
 
   await io.step({
     title: 'Before you start',
-    text: 'Fit a V-bit and make sure the router is off. You will need four pieces of masking tape, the touch plate and its clip, and calipers or a tape measure. Dots go at the four corners of a ' + `${xMax - xMin} × ${yMax - yMin} mm rectangle.`,
+    text: 'Fit a V-bit and make sure the router is off. You will need four pieces of masking tape, the touch plate and its clip, and calipers or a tape measure. Dots go at the four corners of a ' + `${xMax - xMin} × ${yMax - yMin} mm rectangle.` + ' Note: tilt is measured against the surface the tape sits on; if this machine already surfaced the spoilboard, that surface follows the old tilt, so for a true reading put the tape on something the machine did not cut, such as a straight bar laid across.',
   })
   io.busy('Homing…')
   await g('$H')
@@ -67,7 +67,7 @@ export async function calibrate(io) {
     await g(`G53 G0 Z${num(travelZ)}`)
     await g('G4 P0')
   }
-  await g(`G53 G0 Z${Z.max}`)
+  await g(`G53 G0 Z${num(Z.max)}`)
 
   const [A, B, C, D] = corners
   const W = xMax - xMin, H = yMax - yMin
