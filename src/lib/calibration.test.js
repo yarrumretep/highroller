@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { calibrate } from './calibration.js'
 import { getValue } from './yaml-edit.js'
+import { skew } from './calib.js'
 
 const CONFIG = `axes:
   x:
@@ -44,7 +45,7 @@ function scripted({ probes, answers, keep = c => true }) {
     config: { name: 'config.yaml', text: CONFIG, range },
     send: async line => { rec.sent.push(line); return { ok: true, error: null, lines: [] } },
     probe: async () => ({ z: probes.shift() }),
-    step: async s => { rec.steps.push(s.title) },
+    step: async s => { rec.steps.push(s) },
     ask: async q => { rec.asks.push(q); return answers.shift() },
     review: async r => { rec.review = r; return r.changes.filter(keep) },
     apply: async text => { rec.applied = text },
@@ -84,6 +85,10 @@ test('one pass: probes, dots, measurements, and a single config write with every
   assert.equal(getValue(applied, 'axes/x/steps_per_mm'), '49.955')
   assert.equal(getValue(applied, 'axes/y/steps_per_mm'), '50.000') // sides matched: untouched
   assert.equal(io.settings.lastSkewMm.toFixed(3), '1.071')
+
+  // F4: the "make the dot" step previews the exact line that is then sent for that corner
+  const dotStep = rec.steps.find(st => st.title === 'Corner A: make the dot')
+  assert.ok(dotStep.lines.includes('G53 G1 Z-50.1 F100'))
 })
 
 test('unticked changes are not applied, and skipped side measurements leave steps/mm alone', async () => {
@@ -122,4 +127,32 @@ test('a refused command aborts with its message', async () => {
   const { io } = scripted({ probes: [], answers: [] })
   io.send = async line => ({ ok: line !== '$H', error: 'reset', lines: [] })
   await assert.rejects(calibrate(io), /\$H failed: reset/)
+})
+
+test('the motor-side swap is only saved once the review is confirmed, not on cancel', async () => {
+  const { io, rec, settings } = scripted({
+    probes: [-40, -40, -40, -40],
+    answers: [{ ac: d(1120, 2342), bd: d(1120, 2338), ab: null, dc: null, ad: null, bc: null }],
+  })
+  settings.lastSkewMm = 1.0 // set up the same "made it worse" condition as the swap test above
+  io.review = async r => { rec.review = r; return null } // user cancels at the review
+  await calibrate(io)
+  assert.equal(settings.yMotor0AtXmax, false) // proposed, but never committed
+  assert.equal(rec.applied, null)
+})
+
+test('gantry span 0 uses the X travel as the lever arm', async () => {
+  const wideRange = { ...range, X: { min: 0, max: 1250 } }
+  const ac = d(1120, 2342), bd = d(1120, 2338)
+  const { io } = scripted({
+    probes: [-40, -40, -40, -40],
+    answers: [{ ac, bd, ab: null, dc: null, ad: null, bc: null }],
+  })
+  io.config = { ...io.config, range: wideRange }
+  io.settings.spanMm = 0
+  const summary = await calibrate(io)
+  const w = wideRange.X.max - io.settings.marginMm - (wideRange.X.min + io.settings.marginMm)
+  const h = range.Y.max - io.settings.marginMm - (range.Y.min + io.settings.marginMm)
+  const expected = 1250 * skew({ ac, bd, w, h })
+  assert.ok(Math.abs(summary.skewMm - expected) < 0.001, `skewMm ${summary.skewMm} vs expected ${expected}`)
 })

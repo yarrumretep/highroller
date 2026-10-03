@@ -8,15 +8,20 @@
   import Overrides from './components/Overrides.svelte'
   import Console from './components/Console.svelte'
   import Tools from './components/Tools.svelte'
+  import Calibrate from './components/Calibrate.svelte'
   import { machine } from './lib/machine.svelte.js'
   import { job } from './lib/job.svelte.js'
 
   const TABS = [['jog', 'Jog'], ['job', 'Job'], ['tools', 'Tools'], ['more', 'More']]
   let tab = $state('jog')
+  // Mounted at the top level, not inside the Tools tab section: a layout change to the phone breakpoint
+  // mid-run must not hide the dialog behind a `display: none` tab while the page stays inert.
+  let calibrating = $state(false)
 </script>
 
 <TopBar />
 <ConfirmDialog />
+{#if calibrating}<Calibrate onclose={() => (calibrating = false)} />{/if}
 
 <main>
   <section class:off={tab !== 'jog'}>
@@ -29,7 +34,7 @@
     <Overrides />
   </section>
   <section class:off={tab !== 'tools'}>
-    <Tools />
+    <Tools onstart={() => (calibrating = true)} />
   </section>
   <section class:off={tab !== 'more'}>
     <Console />
@@ -60,6 +65,7 @@
   @media (min-width: 900px) {
     main { grid-template-columns: minmax(340px, 420px) minmax(0, 1fr) minmax(300px, 400px); padding-bottom: 12px; }
     main > section:nth-child(3), main > section:nth-child(4) { grid-column: 3; }
+    main > section:nth-child(1), main > section:nth-child(2) { grid-row: span 2; }
     .tabs { display: none; }
   }
 </style>

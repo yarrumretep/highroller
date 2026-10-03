@@ -8,6 +8,10 @@ const DOT_FEED = 100 // mm/min, pushing the V-bit into the tape
 const TRAVEL_ABOVE_MM = 10 // travel height above the first touch
 const WORSE = 1.2 // a pass that leaves more than this much of the previous error made it worse
 
+// ponytail: probe.js's own defaults (fast/slow/touches), spelled out literally so the wizard can show them
+// before probing runs; if those defaults change, update this too.
+const PROBE_LINES = ['G91', 'G38.2 Z-20 F300', 'G0 Z1', 'G38.2 Z-2 F25', 'G0 Z1', 'G38.2 Z-2 F25', 'G0 Z1', 'G38.2 Z-2 F25', 'G90']
+
 const r3 = v => Math.round(v * 1000) / 1000
 const fmt = v => r3(v).toFixed(3) // config values keep three decimals
 const num = v => String(r3(v)) // G-code numbers: no trailing zeros
@@ -19,13 +23,9 @@ export async function calibrate(io) {
     const r = await io.send(line)
     if (!r.ok) throw new Error(`${line} failed: ${r.error}`)
   }
-  if (!(s.spanMm > 0)) {
-    const a = await io.ask({ title: 'Gantry span', text: 'Distance between the two Y motors (and the two Z motors), in mm.', fields: [{ name: 'spanMm', label: 'Span', unit: 'mm' }] })
-    if (!(a.spanMm > 0)) throw new Error('A gantry span is needed')
-    s.spanMm = Number(a.spanMm)
-  }
 
   const { X, Y, Z } = config.range
+  const span = s.spanMm > 0 ? s.spanMm : X.max - X.min // 0 = use the X travel as the lever arm
   const xMin = X.min + s.marginMm, xMax = X.max - s.marginMm, yMin = Y.min + s.marginMm, yMax = Y.max - s.marginMm
   const corners = [
     { name: 'A', x: xMin, y: yMin },
@@ -34,18 +34,26 @@ export async function calibrate(io) {
     { name: 'D', x: xMin, y: yMax },
   ]
 
+  // Computed once, shown to the user, then sent — never recomputed between preview and send.
+  let travelZ = Z.max
+  const homeLine = '$H'
+  const firstZLine = `G53 G0 Z${num(travelZ)}`
+  const firstXYLine = `G53 G0 X${corners[0].x} Y${corners[0].y}`
+
   await io.step({
     title: 'Before you start',
-    text: 'Fit a V-bit and make sure the router is off. You will need four pieces of masking tape, the touch plate and its clip, and calipers or a tape measure. Dots go at the four corners of a ' + `${xMax - xMin} × ${yMax - yMin} mm rectangle.` + ' Note: tilt is measured against the surface the tape sits on; if this machine already surfaced the spoilboard, that surface follows the old tilt, so for a true reading put the tape on something the machine did not cut, such as a straight bar laid across.',
+    text: 'Fit a V-bit and make sure the router is off. You will need four pieces of masking tape, the touch plate and its clip, and calipers or a tape measure. Dots go at the four corners of a ' + `${xMax - xMin} × ${yMax - yMin} mm rectangle.` + ` This pass uses a gantry span of ${num(span)} mm${s.spanMm > 0 ? '' : ' (the X travel, since no span is set)'}.` + ' Note: tilt is measured against the surface the tape sits on; if this machine already surfaced the spoilboard, that surface follows the old tilt, so for a true reading put the tape on something the machine did not cut, such as a straight bar laid across.',
+    lines: [homeLine, firstZLine, firstXYLine],
   })
   io.busy('Homing…')
-  await g('$H')
+  await g(homeLine)
 
-  let travelZ = Z.max
   for (const c of corners) {
     io.busy(`Moving to corner ${c.name}…`)
-    await g(`G53 G0 Z${num(travelZ)}`)
-    await g(`G53 G0 X${c.x} Y${c.y}`)
+    const zLine = c.name === 'A' ? firstZLine : `G53 G0 Z${num(travelZ)}`
+    const xyLine = c.name === 'A' ? firstXYLine : `G53 G0 X${c.x} Y${c.y}`
+    await g(zLine)
+    await g(xyLine)
     await g('G4 P0')
     if (c.name === 'A') {
       await io.step({ title: 'Corner A: set the height', text: 'Jog the bit down until it is a few millimetres above where the plate will sit, then continue.', jog: true })
@@ -54,17 +62,24 @@ export async function calibrate(io) {
       title: `Corner ${c.name}: tape and plate`,
       text: 'Stick a piece of tape under the bit. Put the touch plate on the tape and attach the clip to the bit. Tap the plate against the bit so the app sees the contact, then press Probe.',
       arm: true,
+      lines: PROBE_LINES,
     })
     io.busy('Probing…')
     c.z = (await io.probe()).z
-    await io.step({ title: `Corner ${c.name}: make the dot`, text: 'Lift the plate off the tape. Keep the clip on. Press Continue to push the bit into the tape.' })
+    const plungeLine = `G53 G1 Z${num(c.z - s.plateMm - s.tapeMm)} F${DOT_FEED}`
+    if (c.name === 'A') travelZ = c.z + TRAVEL_ABOVE_MM
+    const upLine = `G53 G0 Z${num(travelZ)}`
+    await io.step({
+      title: `Corner ${c.name}: make the dot`,
+      text: 'Lift the plate off the tape. Keep the clip on. Press Continue to push the bit into the tape.',
+      lines: [plungeLine, upLine],
+    })
     await g('M5')
     await g('G91')
     await g('G0 Z2')
     await g('G90')
-    await g(`G53 G1 Z${num(c.z - s.plateMm - s.tapeMm)} F${DOT_FEED}`)
-    if (c.name === 'A') travelZ = c.z + TRAVEL_ABOVE_MM
-    await g(`G53 G0 Z${num(travelZ)}`)
+    await g(plungeLine)
+    await g(upLine)
     await g('G4 P0')
   }
   await g(`G53 G0 Z${num(Z.max)}`)
@@ -85,18 +100,20 @@ export async function calibrate(io) {
   })
 
   // Tilt: the X-max side lower by this much across the gantry span (average of the two rows)
-  const tiltMm = s.spanMm * (tilt({ zMin: A.z, zMax: B.z, xMin: A.x, xMax: B.x }) + tilt({ zMin: D.z, zMax: C.z, xMin: D.x, xMax: C.x })) / 2
+  const tiltMm = span * (tilt({ zMin: A.z, zMax: B.z, xMin: A.x, xMax: B.x }) + tilt({ zMin: D.z, zMax: C.z, xMin: D.x, xMax: C.x })) / 2
   // Skew: the X-max side further along +Y by this much across the span
-  const skewMm = s.spanMm * skew({ ac: m.ac, bd: m.bd, w: W, h: H })
+  const skewMm = span * skew({ ac: m.ac, bd: m.bd, w: W, h: H })
 
+  // The motor-side swap is only a proposal until the review is confirmed (it must not stick on Cancel).
   const notes = []
+  let yMotor0AtXmax = s.yMotor0AtXmax, zMotor0AtXmax = s.zMotor0AtXmax
   if (s.lastSkewMm != null && Math.abs(skewMm) > WORSE * Math.abs(s.lastSkewMm) && Math.sign(skewMm) === Math.sign(s.lastSkewMm)) {
-    s.yMotor0AtXmax = !s.yMotor0AtXmax
-    notes.push('The last pass made squareness worse, so the Y motor sides have been swapped.')
+    yMotor0AtXmax = !yMotor0AtXmax
+    notes.push('The last pass made squareness worse, so the Y motor sides will be swapped.')
   }
   if (s.lastTiltMm != null && Math.abs(tiltMm) > WORSE * Math.abs(s.lastTiltMm) && Math.sign(tiltMm) === Math.sign(s.lastTiltMm)) {
-    s.zMotor0AtXmax = !s.zMotor0AtXmax
-    notes.push('The last pass made the tilt worse, so the Z motor sides have been swapped.')
+    zMotor0AtXmax = !zMotor0AtXmax
+    notes.push('The last pass made the tilt worse, so the Z motor sides will be swapped.')
   }
 
   // Pull-off: `delta` is how much too far from its switch the X-max side sits. Lower means further from a top
@@ -112,8 +129,8 @@ export async function calibrate(io) {
       if (fmt(old) !== fmt(now)) changes.push({ path: `axes/${axis}/${motor}/pulloff_mm`, label: `${axis.toUpperCase()} ${motor} pull-off`, old: fmt(old), new: fmt(now), apply: true })
     }
   }
-  pulloffs('z', (homesPositive('z') ? 1 : -1) * tiltMm, s.zMotor0AtXmax, 'tilt')
-  pulloffs('y', (homesPositive('y') ? -1 : 1) * skewMm, s.yMotor0AtXmax, 'squareness')
+  pulloffs('z', (homesPositive('z') ? 1 : -1) * tiltMm, zMotor0AtXmax, 'tilt')
+  pulloffs('y', (homesPositive('y') ? -1 : 1) * skewMm, yMotor0AtXmax, 'squareness')
 
   const scale = (axis, commanded, a, b) => {
     if (!(a > 0 && b > 0)) return
@@ -134,6 +151,10 @@ export async function calibrate(io) {
     ],
   })
   if (!chosen || !chosen.length) return summary
+
+  // Only now, with the review confirmed, does the proposed motor-side swap (if any) actually take effect.
+  s.yMotor0AtXmax = yMotor0AtXmax
+  s.zMotor0AtXmax = zMotor0AtXmax
 
   let text = config.text
   for (const c of chosen) text = setValue(text, c.path, c.new)

@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from 'svelte'
   import { machine, jogger } from '../lib/machine.svelte.js'
   import { settings } from '../lib/settings.svelte.js'
 
@@ -57,6 +58,8 @@
   $effect(() => { if (!ready) cancel() })
   // STOP also cancels a press still waiting to become a hold.
   $effect(() => { machine.stops; cancel() })
+  // An unmount mid-hold (e.g. a wizard step with its own pad closing) must stop the jogger's top-up interval too.
+  onDestroy(cancel)
 
   // One finger per press: other fingers and non-main mouse buttons are ignored.
   const mine = e => press?.pointerId === e.pointerId
@@ -74,6 +77,10 @@
 
   function keydown(e) {
     if (pad.offsetParent === null || e.target.closest?.('input, textarea')) return // pad hidden, or typing
+    // A modal dialog (e.g. the Calibrate wizard) open elsewhere must own the keyboard: without this, the
+    // page's own pad behind it jogs in parallel with the wizard's (PageDown moving Z twice the shown step).
+    const modal = document.querySelector('dialog:modal')
+    if (modal && !modal.contains(pad)) return
     if (e.ctrlKey || e.metaKey || e.altKey) return // leave browser shortcuts alone
     if (e.key === '[' || e.key === ']') {
       const i = STEPS.indexOf(settings.step) + (e.key === ']' ? 1 : -1)
