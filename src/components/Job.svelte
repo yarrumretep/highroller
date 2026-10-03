@@ -3,6 +3,7 @@
   import { machine } from '../lib/machine.svelte.js'
   import { job, refresh, load, upload, run, pause, resume, remove } from '../lib/job.svelte.js'
   import { progress } from '../lib/track.js'
+  import { confirm as ask } from '../lib/confirm.svelte.js'
 
   let picker
   let now = $state(Date.now())
@@ -64,7 +65,7 @@
     {:else if s.state === 'Run'}
       <button onclick={pause}>Pause</button>
     {:else}
-      <button class="go" disabled={!idle || !job.data || running} onclick={() => confirm(`Run ${job.name}? Check the bit and work zero first.`) && run()}>Run</button>
+      <button class="go" disabled={!idle || !job.data || running} onclick={async () => (await ask({ title: `Run ${job.name}?`, text: 'Check the bit, the work zero, and that the area is clear.', ok: 'Run' })) && run()}>Run</button>
     {/if}
   </div>
 
@@ -83,7 +84,7 @@
       <div class="file" class:on={f.name === job.name}>
         <button class="name" onclick={() => load(f.name, f.size)}>{f.name}</button>
         <span class="muted mono">{size(f.size)}</span>
-        <button disabled={running} aria-label="Delete {f.name}" onclick={() => confirm(`Delete ${f.name} from the SD card?`) && remove(f.name)}>✕</button>
+        <button disabled={running} aria-label="Delete {f.name}" onclick={async () => (await ask({ title: `Delete ${f.name}?`, text: 'It is removed from the SD card.', ok: 'Delete', danger: true })) && remove(f.name)}>✕</button>
       </div>
     {:else}
       <p class="muted">No files on the SD card yet.</p>

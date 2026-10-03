@@ -1,5 +1,6 @@
 <script>
   import TopBar from './components/TopBar.svelte'
+  import ConfirmDialog from './components/ConfirmDialog.svelte'
   import Dro from './components/Dro.svelte'
   import JogPad from './components/JogPad.svelte'
   import Preview from './components/Preview.svelte'
@@ -14,6 +15,7 @@
 </script>
 
 <TopBar />
+<ConfirmDialog />
 
 <main>
   <section class:off={tab !== 'jog'}>
