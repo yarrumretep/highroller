@@ -176,7 +176,8 @@
   })
 </script>
 
-<div class="panel preview" bind:this={box} {onpointerdown} {onpointermove} {onpointerup} onpointercancel={onpointerup} ondblclick={fit}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="panel preview" aria-label="Toolpath preview" bind:this={box} {onpointerdown} {onpointermove} {onpointerup} onpointercancel={onpointerup} ondblclick={fit}>
   <canvas bind:this={base}></canvas>
   <canvas bind:this={trail}></canvas>
   <canvas bind:this={dot}></canvas>
