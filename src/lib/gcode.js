@@ -1,6 +1,6 @@
 // Turns G-code into a chain of straight segments for the preview, the progress trail and time estimates.
 // Handles G0/G1/G2/G3 (XY arcs by I/J or R), G90/G91, G20/G21 and comments; positions are work coordinates.
-// ponytail: G17 (XY) arcs only, so G18/G19 arcs are drawn straight; lines with G10/G28/G30/G53/G92 are skipped.
+// ponytail: arcs are drawn only in the XY plane (G17); G18/G19 arcs are drawn as straight lines. Lines with G10/G28/G30/G53/G92 are skipped.
 const ARC_MM = 0.5 // chord length for arcs
 const SKIP = new Set([10, 28, 30, 53, 92])
 const STOCK = { X: 9000, Y: 9000, Z: 900 } // stock LowRider max rates, used until the machine's are known
@@ -13,7 +13,7 @@ export function parseGcode(text, maxRate = STOCK) {
   const offset = []
   const time = []
   let x = 0, y = 0, z = 0
-  let abs = true, unit = 1, motion = 0, feed = 0, t = 0, byte = 0
+  let abs = true, unit = 1, motion = 0, feed = 0, t = 0, byte = 0, plane = 17
 
   function add(nx, ny, nz, isRapid, at, rate) {
     const len = Math.hypot(nx - x, ny - y, nz - z)
@@ -77,12 +77,15 @@ export function parseGcode(text, maxRate = STOCK) {
       else if (g === 20) unit = 25.4
       else if (g === 21) unit = 1
       else if (g === 0 || g === 1 || g === 2 || g === 3) motion = g
+      else if (g === 17 || g === 18 || g === 19) plane = g
     }
     if (v.F !== undefined) feed = v.F * unit
-    if (gs.some(g => SKIP.has(g)) || !('X' in v || 'Y' in v || 'Z' in v)) continue
+    const isArc = motion === 2 || motion === 3
+    const hasAxis = 'X' in v || 'Y' in v || 'Z' in v
+    if (gs.some(g => SKIP.has(g)) || !(hasAxis || (isArc && ('I' in v || 'J' in v || 'R' in v)))) continue
     const to = (axis, cur) => (axis in v ? (abs ? v[axis] * unit : cur + v[axis] * unit) : cur)
     const nx = to('X', x), ny = to('Y', y), nz = to('Z', z)
-    if (motion === 2 || motion === 3) arc(nx, ny, nz, v, at)
+    if (isArc && plane === 17) arc(nx, ny, nz, v, at)
     else add(nx, ny, nz, motion === 0, at, motion === 0 ? rapidRate(nx, ny, nz) : feed)
   }
 

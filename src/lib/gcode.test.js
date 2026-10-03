@@ -57,3 +57,17 @@ test('bounds cover the moves but not the origin start point', () => {
   const job = parseGcode('G0 X5 Y5\nG1 X-5 Y20 F100\n')
   assert.deepEqual(job.bounds, { minX: -5, minY: 5, maxX: 5, maxY: 20 })
 })
+
+test('a full circle given by I/J with no end point is drawn', () => {
+  const job = parseGcode('G1 X10 Y0 F100\nG3 I-10 J0\n')
+  const n = job.rapid.length - 1
+  assert.ok(n >= 120, `chords=${n}`) // 2π·10 mm in 0.5 mm chords
+  assert.deepEqual(xyz(job, n + 1), [10, 0, 0])
+  for (let i = 2; i <= n + 1; i++) assert.ok(Math.abs(Math.hypot(job.pts[i * 3], job.pts[i * 3 + 1]) - 10) < 1e-3)
+})
+
+test('arcs outside the XY plane are drawn as straight lines', () => {
+  const job = parseGcode('G18 G2 X10 Z-5 I5 K0 F100\n')
+  assert.equal(job.rapid.length, 1)
+  assert.deepEqual(xyz(job, 1), [10, 0, -5])
+})
