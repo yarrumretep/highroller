@@ -10,52 +10,55 @@ const sd = sdFiles()
 const baseName = file => file.replace(/^\/sd\//i, '').replace(/^\//, '')
 
 // The Job tab's state: SD files, the loaded G-code, and how far a running job has got.
-export const job = $state({ files: [], error: '', busy: '', upload: null, name: '', data: null, current: -1, along: 0, startedAt: 0, failed: '', starting: false, running: false, pausedMs: 0 })
+export const job = $state({ dir: '', files: [], error: '', busy: '', upload: null, name: '', data: null, current: -1, along: 0, startedAt: 0, failed: '', starting: false, running: false, pausedMs: 0 })
 
 // The SD card is only changed while nothing runs: FluidNC accepts uploads mid-job, and one of the same name cuts the running file short.
 const idleNoJob = () => machine.status.state === 'Idle' && !machine.status.sd && !job.running
+// A fresh boot leaves the machine in Alarm, and the file browser must still work then: only a running job blocks it.
+export const noJob = () => !job.running && !machine.status.sd && !['Run', 'Hold'].includes(machine.status.state)
 const WAIT = 'Wait until the job has finished'
 
 // $SD/Run takes ? ! ~ and bytes of 0x80 and above in a name as real-time commands, so such files cannot run.
 export const badName = name => !/^[\x20-\x7e]+$/.test(name) || /[?!~]/.test(name)
 const cannotRun = name => `Rename ${name}: FluidNC cannot run names with ? ! ~ or accents`
 
-export async function refresh() {
+export async function refresh(dir = job.dir) {
   try {
-    job.files = await sd.list()
+    job.files = await sd.list(dir)
+    job.dir = dir
     job.error = ''
   } catch (e) {
     job.error = `SD card: ${e.message}`
   }
 }
 
-export async function load(name, size, text) {
-  // From the list (it passes the size) only while idle; the follower loads a running job's own file by name alone
-  if (text == null && size != null && !idleNoJob()) {
+export async function load(path, size, text) {
+  // From the list (it passes the size) only while no job is running; the follower loads a running job's own file by path alone
+  if (text == null && size != null && !noJob()) {
     job.error = WAIT
     return
   }
-  job.busy = `Loading ${name}…`
+  job.busy = `Loading ${path}…`
   try {
     if (text == null) {
-      const cached = await cacheGet(name)
-      text = cached && (size == null || cached.size === size) ? cached.text : await sd.download(name)
+      const cached = await cacheGet(path)
+      text = cached && (size == null || cached.size === size) ? cached.text : await sd.download(path)
     }
     job.data = parseGcode(text, Number.isFinite(machine.maxRate.X) ? machine.maxRate : undefined) // stock rates until the machine's are read
-    job.name = name
+    job.name = path
     job.current = -1
     job.failed = ''
     job.error = ''
-    cachePut(name, text)
+    cachePut(path, text)
   } catch (e) {
-    job.failed = name
-    job.error = `Couldn't load ${name}: ${e.message}`
+    job.failed = path
+    job.error = `Couldn't load ${path}: ${e.message}`
   }
   job.busy = ''
 }
 
-export async function upload(file) {
-  if (!idleNoJob()) {
+export async function upload(file, dir = job.dir) {
+  if (!noJob()) {
     job.error = WAIT
     return
   }
@@ -65,32 +68,51 @@ export async function upload(file) {
   }
   if (job.files.some(f => f.name === file.name)) {
     if (!(await ask({ title: `Replace ${file.name}?`, text: 'The copy on the SD card is overwritten.', ok: 'Replace', danger: true }))) return
-    if (!idleNoJob()) { // a job may have started while the question was open
+    if (!noJob()) { // a job may have started while the question was open
       job.error = WAIT
       return
     }
   }
   job.upload = 0
   try {
-    job.files = await sd.upload(file, p => (job.upload = p))
-    await load(file.name, file.size, await file.text())
+    job.files = await sd.upload(file, dir, p => (job.upload = p))
+    await load(dir ? `${dir}/${file.name}` : file.name, file.size, await file.text())
   } catch (e) {
     job.error = e.message
   }
   job.upload = null
 }
 
-export async function remove(name) {
-  if (!idleNoJob()) {
+export async function remove(dir, name, isDir = false) {
+  if (!noJob()) {
     job.error = WAIT
     return
   }
   try {
-    job.files = await sd.remove(name)
+    job.files = await sd.remove(dir, name, isDir)
   } catch (e) {
     job.error = e.message
   }
 }
+
+export async function mkdir(dir, name) {
+  if (!noJob()) {
+    job.error = WAIT
+    return
+  }
+  if (badName(name) || name.includes('/')) {
+    job.error = 'Folder names cannot contain ? ! ~ or accents, or /'
+    return
+  }
+  try {
+    job.files = await sd.mkdir(dir, name)
+    job.error = ''
+  } catch (e) {
+    job.error = e.message
+  }
+}
+
+export const sdUrl = path => sd.url(path)
 
 // One job at a time: FluidNC would queue a second $SD/Run and start it straight after the first.
 export async function run() {

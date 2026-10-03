@@ -21,17 +21,20 @@ test('parseList trusts FluidNC success statuses even when the file name looks li
   assert.throws(() => parseList({ files: [], status: 'Cannot delete failed_job.nc Invalid argument' }), /Cannot delete/)
 })
 
-test('lists, downloads and deletes files on the fake controller', async () => {
+test('folders: list, upload into, download from and delete in a folder on the fake controller', async () => {
   const server = start(8095)
   try {
-    const form = new FormData() // the same request upload() sends from the browser
-    form.append('/a.ncS', '5')
-    form.append('myfile', new Blob(['G0 X1']), '/a.nc')
-    await fetch('http://localhost:8095/upload', { method: 'POST', body: form })
     const sd = sdFiles('http://localhost:8095')
-    assert.deepEqual(await sd.list(), [{ name: 'a.nc', size: 5, dir: false }])
-    assert.equal(await sd.download('a.nc'), 'G0 X1')
-    assert.deepEqual(await sd.remove('a.nc'), [])
+    assert.deepEqual(await sd.mkdir('', 'jobs'), [{ name: 'jobs', size: -1, dir: true }])
+    assert.equal(sd.url('jobs/a.nc'), 'http://localhost:8095/sd/jobs/a.nc')
+    const form = new FormData() // the same request upload() sends from the browser, into the folder
+    form.append('/jobs/a.ncS', '5')
+    form.append('myfile', new Blob(['G0 X1']), '/jobs/a.nc')
+    assert.equal((await fetch('http://localhost:8095/upload', { method: 'POST', body: form })).status, 200)
+    assert.deepEqual(await sd.list('jobs'), [{ name: 'a.nc', size: 5, dir: false }])
+    assert.equal(await sd.download('jobs/a.nc'), 'G0 X1')
+    assert.deepEqual(await sd.remove('jobs', 'a.nc'), [])
+    assert.deepEqual(await sd.remove('', 'jobs', true), [])
   } finally {
     server.close()
   }

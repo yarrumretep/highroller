@@ -88,6 +88,7 @@ user_outputs:
 export function start(port = 8081) {
   const m = { state: 'Alarm', mpos: [0, 0, 0], wco: [0, 0, 0], ov: [100, 100, 100], moves: [], absolute: true, feed: 1000, speed: 0, spindle: 0 }
   const sd = new Map() // the fake SD card: name -> Buffer
+  const dirs = new Set() // folders on the fake SD card, as paths without slashes at either end
   const flash = new Map([['config.yaml', Buffer.from(CONFIG_YAML)]]) // the board's flash: config and settings
   let plateZ = -40 // machine Z of the touch plate's top
   let touchUntil = 0 // the probe input reads closed until then (the user tapping the plate to the bit)
@@ -356,6 +357,20 @@ export function start(port = 8081) {
     occupation: 1,
     status: 'Ok',
   })
+  const norm = p => (p ?? '/').replace(/^\/+|\/+$/g, '') // '/jobs/' → 'jobs', '/' → ''
+  const parent = p => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '')
+  const entriesOf = dir => [
+    ...[...dirs].filter(d => parent(d) === dir).map(d => ({ name: d.slice(dir ? dir.length + 1 : 0), shortname: d, size: -1, datetime: '' })),
+    ...[...sd].filter(([p]) => parent(p) === dir).map(([p, buf]) => ({ name: p.slice(dir ? dir.length + 1 : 0), shortname: p, size: buf.length, datetime: '' })),
+  ]
+  const dirListing = (dir, status = 'Ok') => ({
+    files: entriesOf(dir),
+    path: '/',
+    total: '1.00 GB',
+    used: '0.01 GB',
+    occupation: 1,
+    status,
+  })
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://fake')
     if (url.pathname === '/') { // the built app, so it can be tried without Vite (no HMR reloads mid-wizard)
@@ -373,13 +388,32 @@ export function start(port = 8081) {
     if (url.pathname === '/upload' && req.method === 'POST') {
       const body = Readable.toWeb(req)
       const form = await new Request(url, { method: 'POST', headers: { 'content-type': req.headers['content-type'] }, body, duplex: 'half' }).formData()
-      for (const [, v] of form) if (typeof v !== 'string') sd.set(v.name.replace(/^\//, ''), Buffer.from(await v.arrayBuffer()))
-      return json(res, listingOf(sd))
+      let status = 'Ok'
+      let dir = ''
+      for (const [, v] of form) {
+        if (typeof v !== 'string') {
+          const p = v.name.replace(/^\//, '')
+          dir = parent(p)
+          if (dir !== '' && !dirs.has(dir)) { status = 'Upload failed'; continue } // the folder does not exist: store nothing
+          sd.set(p, Buffer.from(await v.arrayBuffer()))
+        }
+      }
+      return json(res, dirListing(dir, status))
     }
     if (url.pathname === '/upload') {
+      const dir = norm(url.searchParams.get('path'))
       const name = url.searchParams.get('filename')
-      if (url.searchParams.get('action') === 'delete' && name) sd.delete(name)
-      return json(res, listingOf(sd))
+      const action = url.searchParams.get('action')
+      const full = dir ? `${dir}/${name}` : name
+      let status = 'Ok'
+      if (action === 'createdir' && name) { dirs.add(full); status = `${name} created` }
+      else if (action === 'delete' && name) { sd.delete(full); status = `${name} deleted` }
+      else if (action === 'deletedir' && name) {
+        for (const d of [...dirs]) if (d === full || d.startsWith(`${full}/`)) dirs.delete(d)
+        for (const [p] of [...sd]) if (p === full || p.startsWith(`${full}/`)) sd.delete(p)
+        status = `${name} deleted`
+      }
+      return json(res, dirListing(dir, status))
     }
     const file = url.pathname.startsWith('/sd/') && sd.get(decodeURIComponent(url.pathname.slice(4)))
     if (file) {

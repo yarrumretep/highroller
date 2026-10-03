@@ -224,6 +224,23 @@ test('line commands sent during a job wait until its file has been read', async 
   }
 })
 
+test('the SD card has folders: per-folder listings, deletedir, and uploads need the folder', async () => {
+  const server = start(8089)
+  try {
+    const list = async dir => (await (await fetch(`http://localhost:8089/upload?path=${encodeURIComponent('/' + (dir ? dir + '/' : ''))}`)).json()).files.map(f => `${f.name}:${f.size}`)
+    await fetch('http://localhost:8089/upload?path=%2F&action=createdir&filename=jobs')
+    const up = async (path, text) => { const f = new FormData(); f.append(path + 'S', String(text.length)); f.append('myfile', new Blob([text]), path); return (await (await fetch('http://localhost:8089/upload', { method: 'POST', body: f })).json()).status }
+    assert.equal(await up('/jobs/a.nc', 'G0 X1'), 'Ok')
+    assert.equal(await up('/nope/b.nc', 'G0 X1'), 'Upload failed')
+    assert.deepEqual(await list(''), ['jobs:-1'])
+    assert.deepEqual(await list('jobs'), ['a.nc:5'])
+    await fetch('http://localhost:8089/upload?path=%2F&action=deletedir&filename=jobs')
+    assert.deepEqual(await list(''), [])
+  } finally {
+    server.close()
+  }
+})
+
 test('SD: disappears once the file has been read, while the last moves still run', async () => {
   const server = start(8102)
   const fnc = new FluidNC({ host: 'localhost:8102' })
