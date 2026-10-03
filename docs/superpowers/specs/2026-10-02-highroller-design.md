@@ -96,7 +96,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 ## Screens
 
 **Always visible**
-- Connection badge.
+- Connection badge, with the controller's Wi-Fi signal strength next to it (from `$System/Stats`, polled every 15 s; hidden in access-point mode).
 - Machine state.
 - Large STOP button.
 - An alarm banner when needed, with the reason in plain language and Home / Unlock buttons.
