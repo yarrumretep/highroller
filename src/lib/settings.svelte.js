@@ -48,9 +48,22 @@ async function loadFromBoard() {
     // ponytail: no file yet (first run), unreadable, or the push failed; keep what we have and write it on the next change
   }
   onBoard = true
+  maybeSave(JSON.stringify(settings)) // a change during the read or the push above doesn't retrigger the effect on its own
 }
 
 export const saveSettings = () => writeFlash(FILE, JSON.stringify(settings, null, 2) + '\n')
+
+// Debounces a write-back once json has moved on from the board's last known copy.
+function maybeSave(json) {
+  clearTimeout(saveTimer) // a change reverted before the timer fires needs no write back either
+  if (!onBoard || json === boardJson) return
+  saveTimer = setTimeout(() => {
+    // ponytail: a failed write is not retried on its own; it goes out again only if another setting changes afterward.
+    saveSettings()
+      .then(() => { boardJson = json })
+      .catch(e => console.warn('Settings not saved:', e.message))
+  }, SAVE_DELAY_MS)
+}
 
 $effect.root(() => {
   // Read the board's copy once the config has loaded (both need the machine idle).
@@ -60,13 +73,6 @@ $effect.root(() => {
   $effect(() => {
     const json = JSON.stringify(settings)
     try { localStorage.setItem(KEY, json) } catch {}
-    clearTimeout(saveTimer) // a change reverted before the timer fires needs no write back either
-    if (!onBoard || json === boardJson) return
-    saveTimer = setTimeout(() => {
-      // ponytail: a failed write is not retried on its own; it goes out again only if another setting changes afterward.
-      saveSettings()
-        .then(() => { boardJson = json })
-        .catch(e => console.warn('Settings not saved:', e.message))
-    }, SAVE_DELAY_MS)
+    maybeSave(json)
   })
 })
