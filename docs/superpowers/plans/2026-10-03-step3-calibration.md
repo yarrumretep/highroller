@@ -51,11 +51,11 @@
 | `src/lib/calibration.js` (new) | `calibrate(io)`: the routine as a script of moves, probes, dots and questions |
 | `src/lib/settings.svelte.js` (rewrite) | Board-backed settings with a localStorage fallback |
 | `src/lib/machine.svelte.js` (modify) | `machine.config` (name, text, axis ranges), loaded when idle |
-| `src/components/Dro.svelte` (modify) | Probe Z0, Go to XY0, Raise Z |
+| `src/components/Dro.svelte` (modify) | Probe Z0, Go to XY0, Raise Z; double-click a coordinate to move |
 | `src/components/Tools.svelte` (new) | The Tools list and the Settings form |
 | `src/components/Calibrate.svelte` (new) | The wizard dialog driven by `calibrate(io)` |
 | `src/App.svelte` (modify) | Tools tab; preview props |
-| `src/components/Preview.svelte` (modify) | Machine coordinates, travel outline, fit toggle |
+| `src/components/Preview.svelte` (modify) | Machine coordinates, travel outline, fit toggle; tap to go there |
 | `dev/fake-fluidnc.js` (modify) | Touch plate and probing, flash files, `$Bye`, `$HZ`, `G4` |
 
 ---
@@ -1799,7 +1799,205 @@ git commit -m "Draw the preview in machine coordinates with the travel outline"
 
 ---
 
-### Task 10: On the machine (done by the user, hands near the e-stop)
+### Task 10: Double-click a coordinate to move that axis
+
+**Files:**
+- Modify: `src/components/Dro.svelte` (as left by Task 7)
+
+**Interfaces:**
+- Consumes: `send`, `machine.status.wpos/mpos`, the `idle` and `run()` helpers Task 7 added.
+- Produces: double-click (or double-tap) on the large work number turns it into an input pre-filled with the current value; Enter or **Go** sends `G0 <axis><value>`; Escape cancels. The small machine number does the same with `G53 G0 <axis><value>`. Only while idle.
+
+- [ ] **Step 1: Edit `src/components/Dro.svelte`**
+
+Add to the `<script>` block, after the `raise` helper:
+```js
+  // Double-click a number to type a destination for that axis: Enter or Go moves there, Escape cancels.
+  let edit = $state(null) // { i, machineCoords, value }
+  const focus = el => el.focus()
+  function startEdit(i, machineCoords) {
+    if (!idle || busy) return
+    edit = { i, machineCoords, value: (machineCoords ? machine.status.mpos[i] : machine.status.wpos[i]).toFixed(3) }
+  }
+  function go() {
+    const v = Number(edit.value)
+    if (!Number.isFinite(v)) return
+    const line = `${edit.machineCoords ? 'G53 ' : ''}G0 ${AXES[edit.i]}${v}`
+    edit = null
+    run('Moving…', () => send(line))
+  }
+  function editKey(e) {
+    if (e.key === 'Enter') go()
+    else if (e.key === 'Escape') edit = null
+  }
+```
+
+Replace the row markup inside `{#each AXES as axis, i}` with:
+```svelte
+    <div class="row">
+      <span class="axis">{axis}</span>
+      {#if edit?.i === i}
+        <span class="editor">
+          <input class="mono" type="number" step="0.001" inputmode="decimal" bind:value={edit.value} onkeydown={editKey} use:focus />
+          <button class="go" onclick={go}>Go</button>
+        </span>
+        <span class="mach">{edit.machineCoords ? 'machine' : 'work'}</span>
+      {:else}
+        <button class="plain work mono" ondblclick={() => startEdit(i, false)} title="Double-click to move here">{machine.status.wpos[i]?.toFixed(3)}</button>
+        <button class="plain mach mono" ondblclick={() => startEdit(i, true)} title="Machine position. Double-click to move here">{machine.status.mpos[i]?.toFixed(3)}</button>
+      {/if}
+      <button disabled={!idle} onclick={() => send(`G10 L20 P0 ${axis}0`)}>Zero</button>
+    </div>
+```
+
+Add to the `<style>`:
+```css
+  .plain { padding: 0; border: 0; background: none; border-radius: 6px; }
+  .plain:active { background: var(--btn-active); }
+  .editor { display: flex; gap: 6px; align-items: center; }
+  .editor input { flex: 1; min-width: 0; min-height: 44px; padding: 0 8px; font-size: 22px; border: 1px solid var(--accent); border-radius: 10px; background: var(--bg); }
+  .editor .go { color: white; background: var(--ok); border-color: var(--ok); }
+```
+(The existing `.work` and `.mach` rules keep their sizes and alignment; `.plain` only strips the button chrome.)
+
+- [ ] **Step 2: Build and check against the fake (the controller does this step)**
+
+`npm run build` must succeed with no new warnings (buttons, not spans, carry the double-click handlers, so no a11y warning). With the fake, after unlocking: double-click the X work number, type 50, Enter → the console shows `G0 X50` and X reads 50.000. Double-click the small machine number for Y, type 10, Go → `G53 G0 Y10`. Escape closes the editor without moving.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/components/Dro.svelte
+git commit -m "Double-click a coordinate to move that axis to a typed destination"
+```
+
+---
+
+### Task 11: Tap the preview to send the router there
+
+**Files:**
+- Modify: `src/components/Preview.svelte` (as left by Task 9), `src/App.svelte`
+
+**Interfaces:**
+- Consumes: the Task 9 preview (machine coordinates, `range`), `send`, `machine.status`.
+- Produces: `<Preview … canGo onGo />`. A tap or click (not a drag or pinch) drops a crosshair at that machine position and shows a "Go to X… Y…" button; pressing it calls `onGo(x, y)`. Tapping the crosshair again clears it; tapping elsewhere moves it. Taps outside the travel outline are ignored. `canGo` (idle, no job) gates both the crosshair and the button; the crosshair clears when `canGo` turns false. App.svelte sends `G53 G0 X… Y…` (XY only, at the current Z).
+
+- [ ] **Step 1: Edit `src/components/Preview.svelte`**
+
+a) Add `canGo = false, onGo = null` to the props: `let { job = null, current = -1, mpos = [0, 0, 0], wpos = [0, 0, 0], wco = [0, 0, 0], range = null, canGo = false, onGo = null } = $props()`.
+
+b) After the `jx`/`jy` helpers add the inverse and the target state:
+```js
+  const mx = px => (px - view.ox) / view.scale // screen → machine
+  const my = py => (view.oy - py) / view.scale
+  let target = $state(null) // { x, y } machine coordinates of the tapped spot
+  const TAP_PX = 8 // a press that moves less than this is a tap
+```
+
+c) In `drawDot`, before the tool circle (`ctx.beginPath()` / `ctx.arc(...)`), draw the crosshair:
+```js
+    if (target && canGo) {
+      const tx = sx(target.x), ty = sy(target.y)
+      ctx.beginPath()
+      ctx.moveTo(tx - 10, ty); ctx.lineTo(tx + 10, ty)
+      ctx.moveTo(tx, ty - 10); ctx.lineTo(tx, ty + 10)
+      ctx.strokeStyle = colors.accent
+      ctx.lineWidth = 2
+      ctx.stroke()
+    }
+```
+and add `accent: v('--accent')` to the `colors` object in `onMount`.
+
+d) Pointer handling: replace `onpointerdown` and `onpointerup` with:
+```js
+  let press = null // where a single pointer went down, to tell a tap from a drag
+  function onpointerdown(e) {
+    box.setPointerCapture(e.pointerId)
+    pointers.set(e.pointerId, local(e))
+    press = pointers.size === 1 ? { id: e.pointerId, at: local(e) } : null
+  }
+  function onpointerup(e) {
+    const p = pointers.get(e.pointerId)
+    pointers.delete(e.pointerId)
+    if (press?.id !== e.pointerId || !p) return
+    const [x0, y0] = press.at
+    press = null
+    if (Math.hypot(p[0] - x0, p[1] - y0) > TAP_PX) return
+    tap(p)
+  }
+  function onpointercancel(e) {
+    pointers.delete(e.pointerId)
+    press = null
+  }
+  function tap([px, py]) {
+    if (!canGo) return
+    if (target && Math.hypot(sx(target.x) - px, sy(target.y) - py) < 16) { // tapping the crosshair clears it
+      target = null
+      return
+    }
+    const x = mx(px), y = my(py)
+    if (range && (x < range.X.min || x > range.X.max || y < range.Y.min || y > range.Y.max)) return // outside the reach
+    target = { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 }
+  }
+  function goToTarget() {
+    const t = target
+    target = null
+    onGo?.(t.x, t.y)
+  }
+```
+Note `onpointermove` must also cancel a press that turned into a pinch: at the top of the `after.length === 2` branch add `press = null`.
+
+e) Effects: add
+```js
+  $effect(() => { if (!canGo) target = null })
+  $effect(() => {
+    target
+    if (size.w && !raf) drawDot()
+  })
+```
+
+f) Markup: change `onpointercancel={onpointerup}` to `onpointercancel={onpointercancel}`, and add inside the `.preview` div, before the hint:
+```svelte
+  {#if target && canGo}
+    <button class="goto" onclick={goToTarget}>Go to X {target.x} Y {target.y}</button>
+  {/if}
+```
+with the style:
+```css
+  .goto { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); min-height: 48px; padding: 0 18px; font-weight: 700; color: white; background: var(--accent); border-color: var(--accent); }
+```
+
+- [ ] **Step 2: Wire it in `src/App.svelte`**
+
+Replace the `<Preview … />` line with:
+```svelte
+    <Preview
+      job={job.data}
+      current={job.current}
+      mpos={machine.status.mpos}
+      wpos={machine.status.wpos}
+      wco={machine.status.wco}
+      range={machine.config?.range}
+      canGo={machine.conn === 'open' && machine.status.state === 'Idle' && !machine.status.sd}
+      onGo={(x, y) => send(`G53 G0 X${x} Y${y}`)}
+    />
+```
+(`send` is already imported in App.svelte? If not, add it to the import from `./lib/machine.svelte.js`.)
+
+- [ ] **Step 3: Build and check against the fake (the controller does this step)**
+
+`npm run build` must succeed. With the fake, after unlocking: a click inside the dashed rectangle shows a crosshair and the "Go to X … Y …" button; pressing it moves the dot there (console: `G53 G0 X… Y…`); clicking the crosshair clears it; dragging does not create one; a click outside the rectangle does nothing; while a job runs, no crosshair appears.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/components/Preview.svelte src/App.svelte
+git commit -m "Tap the preview to send the router to that spot"
+```
+
+---
+
+### Task 12: On the machine (done by the user, hands near the e-stop)
 
 - [ ] **Step 1: Probe Z0.** With the plate on the stock and the clip on: tap, Probe Z0, and check the work Z reads the plate thickness at contact, then 5 mm higher.
 - [ ] **Step 2: A calibration pass.** Set the gantry span. Tape at the four corners. Run the routine and measure. Before pressing Apply, compare the review's numbers with what you'd expect; untick anything doubtful. After the restart and home, check `config.yaml.bak` exists on the flash (More → Console: `$LocalFS/List`).
