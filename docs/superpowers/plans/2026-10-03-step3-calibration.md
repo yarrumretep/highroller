@@ -921,7 +921,7 @@ const DEFAULTS = {
   step: 10,
   feedXY: 3000,
   feedZ: 600,
-  plateMm: 10, // touch plate thickness
+  plateMm: 0.5, // touch plate thickness; V1 Engineering's plate is 0.5 mm
   tapeMm: 0.1, // masking tape thickness, for the calibration dots
   spanMm: 0, // distance between the two Y (and Z) motors; 0 = not set yet
   marginMm: 50, // how far inside the travel the calibration corners sit
@@ -1417,7 +1417,7 @@ Add to the `<style>`:
 
 Run: `npm run build` (no new warnings). Then with the fake and dev server:
 - Unlock. "Probe Z0" is disabled with the hint shown. `curl -X POST localhost:8081/fake/touch` → the button enables.
-- Press it: the console shows the probe moves; Z work position reads 10.000 at the contact (plate thickness) and the bit lifts 5 mm (work Z 15.000).
+- Press it: the console shows the probe moves; Z work position reads 0.500 at the contact (plate thickness) and the bit lifts 5 mm (work Z 5.500).
 - "Go to XY0" and "Raise Z" move as described.
 - Restart the fake (it boots in Alarm): the Home buttons are enabled while the others are not; "Home X" sends `$HX` (the console shows it, the status goes Home then Idle); "Home all" sends `$H`.
 
