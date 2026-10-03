@@ -222,6 +222,7 @@
     if (!canGo) return
     if (target && Math.hypot(sx(target.x) - px, sy(target.y) - py) < 16) { // tapping the crosshair clears it
       target = null
+      goError = ''
       return
     }
     if (!range) return // can't validate the reach yet
@@ -275,8 +276,8 @@
   {#if target && canGo}
     <button class="goto" onpointerdown={e => e.stopPropagation()} onpointerup={e => e.stopPropagation()} onclick={goToTarget}>Go to X {target.x.toFixed(1)} Y {target.y.toFixed(1)}</button>
   {/if}
-  {#if goError}<p class="goerr">{goError}</p>{/if}
-  {#if !job}<p class="hint">{range ? 'Load a file to see it on the table' : 'Load a file to preview it here'}</p>{/if}
+  <!-- goerr and hint share one spot: a refusal takes priority over the "load a file" hint -->
+  {#if goError}<p class="goerr">{goError}</p>{:else if !job}<p class="hint">{range ? 'Load a file to see it on the table' : 'Load a file to preview it here'}</p>{/if}
 </div>
 
 <style>

@@ -49,7 +49,10 @@
     if (z != null && z < 10) await cmd('G0 Z10') // clear the stock (work Z0 is its top) without climbing to the top of travel
     await cmd('G0 X0 Y0')
   })
-  const raise = () => run('Raising…', () => cmd(`G53 G0 Z${top}`))
+  const raise = () => run('Raising…', async () => {
+    if (!machine.homed) throw new Error('Home the machine first.') // G53 needs a known machine position
+    await cmd(`G53 G0 Z${top}`)
+  })
 
   // Double-click a number to type a destination for that axis: Enter or Go moves there, Escape cancels.
   let edit = $state(null) // { i, machineCoords, value }
@@ -112,7 +115,7 @@
     <!-- Enabled before the plate has touched: pressing it then shows the hint (a disabled button cannot be tapped for help) -->
     <button class:go={armed} disabled={!idle || !!busy} onclick={() => (armed ? probe() : (hint = true))} title={HINT}>Probe Z0</button>
     <button disabled={!idle || !!busy || top == null || !machine.status.wpos} onclick={goXY0}>Go to XY0</button>
-    <button disabled={!idle || !!busy || top == null} onclick={raise}>Raise Z</button>
+    <button disabled={!idle || !!busy || top == null || !machine.homed} onclick={raise}>Raise Z</button>
   </div>
   <div class="homes">
     <button disabled={!canHome || !!busy} onclick={() => home('')}>Home all</button>
