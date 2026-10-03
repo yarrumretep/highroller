@@ -2,6 +2,9 @@ import { FluidNC } from './fluidnc.js'
 import { EMPTY, wifiPercent } from './status.js'
 import { createJogger } from './jog.js'
 import { stopMachine } from './stop.js'
+import { readFlash } from './flash.js'
+import { getValue } from './yaml-edit.js'
+import { axisRange } from './calib.js'
 
 const LOG_MAX = 500
 
@@ -15,6 +18,7 @@ export const machine = $state({
   stops: 0,
   stopping: false,
   wifi: null,
+  config: null,
 })
 
 function log(line) {
@@ -26,7 +30,7 @@ function log(line) {
 const whenIdle = []
 const idle = s => s.state === 'Idle' && !s.sd
 function runWhenIdle(fn) {
-  whenIdle.push(fn)
+  if (!whenIdle.includes(fn)) whenIdle.push(fn) // a reconnect during a long job would otherwise queue it again
   if (idle(machine.status)) flushIdle()
 }
 function flushIdle() {
@@ -43,6 +47,7 @@ export const fnc = new FluidNC({
   onStatus: s => {
     machine.status = s
     if (s.state !== 'Alarm') machine.alarm = null
+    if (!machine.config && !loadingConfig && (s.state === 'Idle' || s.state === 'Alarm')) reloadConfig()
     if (idle(s)) flushIdle()
   },
   onLine: line => {
@@ -82,6 +87,36 @@ async function readWifi() {
   const r = await fnc.send('$System/Stats', { quiet: true })
   wifiPending = false
   if (r.ok) machine.wifi = wifiPercent(r.lines)
+}
+
+let loadingConfig = false
+
+// Axis travel in machine coordinates, from the config's homing settings.
+function rangesOf(text) {
+  const range = {}
+  for (const axis of ['X', 'Y', 'Z']) {
+    const a = axis.toLowerCase()
+    const maxTravel = Number(getValue(text, `axes/${a}/max_travel_mm`))
+    const mposMm = Number(getValue(text, `axes/${a}/homing/mpos_mm`) ?? 0)
+    const positive = getValue(text, `axes/${a}/homing/positive_direction`) === 'true'
+    if (!(maxTravel > 0)) return null
+    range[axis] = axisRange({ maxTravel, mposMm, positive })
+  }
+  return range
+}
+
+// The config file is only readable while idle; it is kept until the next reload.
+export async function reloadConfig() {
+  loadingConfig = true
+  try {
+    const r = await fnc.send('$Config/Filename', { quiet: true })
+    const name = r.lines.find(l => l.startsWith('$Config/Filename='))?.split('=')[1] || 'config.yaml'
+    const text = await readFlash(fnc, name)
+    machine.config = { name, text, range: rangesOf(text) }
+  } catch (e) {
+    log(`Config not read: ${e.message}`)
+  }
+  loadingConfig = false
 }
 
 export const jogger = createJogger(fnc)

@@ -10,6 +10,6 @@ export default defineConfig(({ mode }) => {
   const target = `http://${env.VITE_FLUIDNC_HOST || 'localhost:8081'}`
   return {
     plugins: [svelte(), viteSingleFile()],
-    server: { proxy: { '/upload': target, '/sd/': target } },
+    server: { proxy: { '/upload': target, '/sd/': target, '/files': target, '/fake/': target } },
   }
 })
