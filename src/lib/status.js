@@ -62,7 +62,8 @@ export function parseStatus(line, prev = EMPTY) {
 // holding {"id":"Signal","value":"78%"} as a station and nothing of the kind as an access point).
 // The plain "Signal: 78%" line is kept for firmware that prints one.
 export function wifiPercent(lines) {
-  const json = lines.map(l => /^\[MSG:JSON:(.*)\]$/.exec(l)?.[1]).filter(Boolean).join('')
+  // Chunks arrive wrapped as [MSG:JSON:…] or bare, depending on the channel: unwrap what is wrapped and join the rest as is.
+  const json = lines.map(l => /^\[MSG:JSON:(.*)\]$/.exec(l)?.[1] ?? l).join('')
   const m = /"id"\s*:\s*"Signal"\s*,\s*"value"\s*:\s*"(\d+)%"/.exec(json) || lines.map(l => /^Signal:\s*(\d+)%/.exec(l)).find(Boolean)
   return m ? Number(m[1]) : null
 }

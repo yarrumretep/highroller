@@ -95,6 +95,7 @@ test('wifiPercent reads the Signal entry of the JSON stats, split across [MSG:JS
   const json = '{"cmd":"420","status":"ok","data":[{"id":"Chip ID","value":"36942"},{"id":"Signal","value":"78%"},{"id":"FW version","value":"FluidNC v3.9.9"}]}'
   const chunks = [`[MSG:JSON:${json.slice(0, 70)}]`, `[MSG:JSON:${json.slice(70)}]`] // the cut lands inside the Signal entry
   assert.equal(wifiPercent(chunks), 78)
+  assert.equal(wifiPercent([json.slice(0, 70), json.slice(70)]), 78) // the websocket channel sends the chunks bare
   assert.equal(wifiPercent(['[MSG:JSON:{"cmd":"420","status":"ok","data":[{"id":"Current WiFi Mode","value":"AP"}]}]']), null)
   // the plain 3.9.9 output has no signal; an older plain "Signal:" line still reads
   assert.equal(wifiPercent(['Chip ID: 36942', '[MSG:Mode=STA:SSID=shop:Status=Connected:IP=1.2.3.4:MAC=00]', 'FW version: FluidNC v3.9.9']), null)
