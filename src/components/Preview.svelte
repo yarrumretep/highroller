@@ -266,7 +266,7 @@
   <canvas bind:this={trail}></canvas>
   <canvas bind:this={dot}></canvas>
   {#if target && canGo}
-    <button class="goto" onclick={goToTarget}>Go to X {target.x.toFixed(1)} Y {target.y.toFixed(1)}</button>
+    <button class="goto" onpointerdown={e => e.stopPropagation()} onclick={goToTarget}>Go to X {target.x.toFixed(1)} Y {target.y.toFixed(1)}</button>
   {/if}
   {#if !job}<p class="hint">{range ? 'Load a file to see it on the table' : 'Load a file to preview it here'}</p>{/if}
 </div>
