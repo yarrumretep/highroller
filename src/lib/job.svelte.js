@@ -69,16 +69,24 @@ export const resume = () => fnc.resume()
 
 // Follow a running SD job: load its file if it isn't the one shown (page reload, or started elsewhere),
 // then track the segment being cut. Only machine.status is a dependency; the rest is read untracked.
+let wasRunning = false
 $effect.root(() => {
   $effect(() => {
     const s = machine.status
     untrack(() => {
       if (!s.sd) {
         job.startedAt = 0
+        job.failed = '' // a load that failed mid-job may work next time
+        wasRunning = false
         return
+      }
+      if (!wasRunning) {
+        wasRunning = true
+        job.current = -1 // a job just started, here or elsewhere: track it from its beginning
       }
       const name = baseName(s.sd.file)
       if (name !== job.name) {
+        // ponytail: trusted by name while a job runs — FluidNC 3.x refuses downloads then; the next load from the list (with its size) refreshes the cache
         if (!job.busy && job.failed !== name) load(name)
         return
       }
