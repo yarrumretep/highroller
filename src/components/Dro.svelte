@@ -49,6 +49,31 @@
     await cmd('G0 X0 Y0')
   })
   const raise = () => run('Raising…', () => cmd(`G53 G0 Z${top}`))
+
+  // Double-click a number to type a destination for that axis: Enter or Go moves there, Escape cancels.
+  let edit = $state(null) // { i, machineCoords, value }
+  const focus = el => el.focus()
+  function startEdit(i, machineCoords) {
+    if (!idle || busy) return
+    const pos = machineCoords ? machine.status.mpos : machine.status.wpos
+    if (!pos) return // not reported yet
+    edit = { i, machineCoords, value: pos[i].toFixed(3) }
+  }
+  function go() {
+    const v = Number(edit.value)
+    if (!Number.isFinite(v)) return
+    const line = `${edit.machineCoords ? 'G53 ' : ''}G0 ${AXES[edit.i]}${v}`
+    edit = null
+    run('Moving…', () => cmd(line))
+  }
+  function editKey(e) {
+    if (e.key === 'Enter') go()
+    else if (e.key === 'Escape') edit = null
+  }
+  function editBlur() {
+    // Deferred: clicking Go blurs the input first, and that click must still see `edit`.
+    setTimeout(() => { edit = null })
+  }
   // Homing is allowed in Alarm too: it is how the machine leaves the boot alarm.
   const canHome = $derived(machine.conn === 'open' && (machine.status.state === 'Idle' || machine.status.state === 'Alarm'))
   const home = axis => run(`Homing ${axis || 'all'}…`, () => cmd(axis ? `$H${axis}` : '$H'))
@@ -58,8 +83,16 @@
   {#each AXES as axis, i}
     <div class="row">
       <span class="axis">{axis}</span>
-      <span class="work mono">{machine.status.wpos?.[i]?.toFixed(3) ?? '–.---'}</span>
-      <span class="mach mono" title="Machine position">{machine.status.mpos?.[i]?.toFixed(3) ?? '–.---'}</span>
+      {#if edit?.i === i}
+        <span class="editor">
+          <input class="mono" type="number" step="0.001" inputmode="decimal" bind:value={edit.value} onkeydown={editKey} onblur={editBlur} use:focus />
+          <button class="go" onclick={go}>Go</button>
+        </span>
+        <span class="mach">{edit.machineCoords ? 'machine' : 'work'}</span>
+      {:else}
+        <button class="plain work mono" ondblclick={() => startEdit(i, false)} title="Double-click to move here">{machine.status.wpos?.[i]?.toFixed(3) ?? '–.---'}</button>
+        <button class="plain mach mono" ondblclick={() => startEdit(i, true)} title="Machine position. Double-click to move here">{machine.status.mpos?.[i]?.toFixed(3) ?? '–.---'}</button>
+      {/if}
       <button disabled={!idle || !machine.status.wpos || !!busy} onclick={() => run('Zeroing…', () => cmd(`G10 L20 P0 ${axis}0`))}>Zero</button>
     </div>
   {/each}
@@ -90,4 +123,9 @@
   .homes button { min-height: 44px; padding: 0 6px; font-size: 13px; } /* smaller than the jog buttons, still a finger-sized target */
   .note { margin: 0; min-height: 1.3em; font-size: 13px; color: var(--muted); }
   .err { color: var(--bad); }
+  .plain { padding: 0; border: 0; background: none; border-radius: 6px; }
+  .plain:active { background: var(--btn-active); }
+  .editor { display: flex; gap: 6px; align-items: center; }
+  .editor input { flex: 1; min-width: 0; min-height: 44px; padding: 0 8px; font-size: 22px; border: 1px solid var(--accent); border-radius: 10px; background: var(--bg); }
+  .editor .go { color: white; background: var(--ok); border-color: var(--ok); }
 </style>
