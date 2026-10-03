@@ -1,6 +1,7 @@
 import { FluidNC } from './fluidnc.js'
 import { EMPTY } from './status.js'
 import { createJogger } from './jog.js'
+import { stopMachine } from './stop.js'
 
 const LOG_MAX = 500
 
@@ -61,17 +62,7 @@ export async function send(line) {
   return r
 }
 
-const moving = s => s.state === 'Run' || s.state === 'Jog' || (s.state === 'Hold' && s.sub !== 0)
-
-const sleep = ms => new Promise(r => setTimeout(r, ms))
-
-// Hold first so the machine decelerates and keeps its position, then reset.
 export async function stop() {
   machine.stops++ // JogPad cancels any press still waiting to become a hold
-  jogger.stop()
-  fnc.realtime(0x21) // '!'
-  await sleep(150) // let a fresh report arrive: motion may have started since the last one
-  const t0 = Date.now()
-  while (moving(machine.status) && Date.now() - t0 < 2000) await sleep(50)
-  fnc.reset()
+  await stopMachine(fnc, jogger)
 }
