@@ -44,7 +44,8 @@
     await cmd('G90')
   })
   const goXY0 = () => run('Moving…', async () => {
-    if (top != null) await cmd(`G53 G0 Z${top}`)
+    const z = machine.status.wpos?.[2]
+    if (z != null && z < 10) await cmd('G0 Z10') // clear the stock (work Z0 is its top) without climbing to the top of travel
     await cmd('G0 X0 Y0')
   })
   const raise = () => run('Raising…', () => cmd(`G53 G0 Z${top}`))

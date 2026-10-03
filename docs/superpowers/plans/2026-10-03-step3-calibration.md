@@ -1326,7 +1326,7 @@ git commit -m "Add the calibration routine: four dots, measurements, one config 
 - Consumes: `probeZ` (Task 1), `machine.config.range` and `machine.status.pins` (Task 5), `settings.plateMm` (Task 5), `send`, `fnc`.
 - Produces three buttons under the position readout:
   - **Probe Z0:** enabled once the probe input has been seen to close and open (the user taps the plate to the bit). Runs the probe routine, sets work Z so that the stock top is zero (`G10 L20 P0 Z<plate thickness>` at the contact point), then lifts 5 mm.
-  - **Go to XY0:** rises to the top of Z travel first, then `G0 X0 Y0`.
+  - **Go to XY0:** first raises to work Z 10 if the bit is lower (clear of the stock without climbing to the top of travel), then `G0 X0 Y0`.
   - **Raise Z:** `G53 G0 Z<top>`.
   - Each needs the machine Idle and connected; errors show in a line under the buttons.
   - **Home all / Home X / Home Y / Home Z:** a row of smaller buttons under those three, sending `$H`, `$HX`, `$HY`, `$HZ`. Enabled while connected and Idle *or Alarm* (homing is the way out of the boot alarm); the top bar's alarm banner keeps its own Home button.
@@ -1376,7 +1376,8 @@ Replace the `<script>` block with:
     await send('G90')
   })
   const goXY0 = () => run('Moving…', async () => {
-    if (top != null) await send(`G53 G0 Z${top}`)
+    const z = machine.status.wpos?.[2]
+    if (z != null && z < 10) await send('G0 Z10') // clear the stock (work Z0 is its top) without climbing to the top of travel
     await send('G0 X0 Y0')
   })
   const raise = () => run('Raising…', () => send(`G53 G0 Z${top}`))
