@@ -1,0 +1,36 @@
+// The touch-plate routine: find the plate fast, back off, then touch slowly a few times and take the median.
+// Heights are machine coordinates, straight from FluidNC's [PRB:x,y,z:1] report.
+const DEFAULTS = { fast: 300, slow: 25, maxDown: 20, backoff: 1, touches: 3, tolerance: 0.05 }
+
+const prbZ = lines => {
+  const m = lines.map(l => /^\[PRB:([^:\]]+):1\]/.exec(l)).find(Boolean)
+  return m ? Number(m[1].split(',')[2]) : NaN
+}
+
+export async function probeZ(fnc, opts = {}) {
+  const o = { ...DEFAULTS, ...opts }
+  const quiet = line => fnc.send(line, { quiet: true })
+  const probe = async (mm, feed) => {
+    const r = await fnc.send(`G38.2 Z-${+mm.toFixed(3)} F${feed}`)
+    if (r.error === 5 || r.lines.some(l => /^\[PRB:[^\]]*:0\]/.test(l))) throw new Error('No contact: is the plate under the bit and the clip attached?')
+    if (!r.ok) throw new Error(`Probe refused: error ${r.error}`)
+    const z = prbZ(r.lines)
+    if (Number.isNaN(z)) throw new Error('Probe refused: no [PRB:] report')
+    return z
+  }
+  await quiet('G91')
+  try {
+    await probe(o.maxDown, o.fast)
+    const touches = []
+    for (let i = 0; i < o.touches; i++) {
+      await quiet(`G0 Z${+o.backoff.toFixed(3)}`)
+      touches.push(await probe(2 * o.backoff, o.slow)) // the plate is one back-off below; allow twice that
+    }
+    const sorted = [...touches].sort((a, b) => a - b)
+    const spread = sorted.at(-1) - sorted[0]
+    if (spread > o.tolerance) throw new Error(`Touches differ by ${spread.toFixed(3)} mm. Clean the plate and try again.`)
+    return { z: sorted[Math.floor(sorted.length / 2)], spread, touches }
+  } finally {
+    await quiet('G90')
+  }
+}
