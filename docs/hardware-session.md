@@ -16,7 +16,7 @@ Router unplugged (spindle off) for everything up to the air-cut; a hand near the
 ## Jogging, STOP, homing, probing
 
 6. **Jog** each axis with taps and holds; STOP during a held jog. Pass: the machine stops at once and the position is kept.
-7. **Home all**, then Home Z alone. Pass: the tool dot sits at the corner of the dashed outline, and the outline matches the table with a tape measure.
+7. **Home all**, then Home Z alone. Pass: after Home all the console shows `[MSG:Homed:Z]` then `[MSG:Homed:XY]` (one line per homing cycle; the app unlocks each axis's machine-coordinate moves from these); the tool dot sits at the corner of the dashed outline, and the outline matches the table with a tape measure.
 8. **Arming.** With the clip on, tap the plate to the bit: Probe Z0 turns green. Jog any axis: it turns grey again (arming expires when the machine leaves Idle). With the clip off a tap does nothing.
 9. **Probe Z0 on scrap.** Pass: the three slow touches agree within 0.05 mm (watch the console), work Z reads the plate thickness at contact and 5 mm more after the lift, and `G0 Z0` afterwards gives a paper-drag fit on the stock.
 10. **Probe miss.** No plate, bit well above anything, arm with a tap, Probe. Pass: the bit drops 20 mm, "No contact" is shown, the machine returns to Idle on its own.

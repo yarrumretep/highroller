@@ -1,6 +1,7 @@
 import { skew, tilt, stepsPerMm, splitPulloff } from './calib.js'
 import { getValue, setValue } from './yaml-edit.js'
 import { probeLines } from './probe.js'
+import { homesPositive } from './homing.js'
 
 // One calibration pass, written as a script. The UI (or a test) supplies `io`: the config, machine commands,
 // the probe, and the manual steps. Four V-bit dots on tape give Z tilt (from the probes), squareness (the
@@ -8,7 +9,7 @@ import { probeLines } from './probe.js'
 const DOT_FEED = 100 // mm/min, pushing the V-bit into the tape
 const TRAVEL_ABOVE_MM = 10 // travel height above the first touch
 const WORSE = 1.2 // a pass that leaves more than this much of the previous error made it worse
-const LIFT_MM = 5 // after a failed probe, before it is tried again
+const LIFT_MM = 5 // after a probe that can be redone, before it is tried again
 const OFF_MM = 0.5 // a corner probed further than this from where it was sent is mentioned in the review
 const MAX_PULLOFF_STEP = 3 // mm per motor per pass; more is likelier a bad measurement than a real error
 
@@ -71,8 +72,9 @@ export async function calibrate(io) {
       // Z only: an X/Y jog here would move the dot away from the corner the maths expects
       await io.step({ title: 'Corner A: set the height', text: 'Jog the bit down until it is a few millimetres above where the plate will sit, then continue.', jog: 'z' })
     }
-    // A failed probe (a miss, or touches that disagree) is redone: lift clear and ask again. Once STOP is
-    // pressed every send refuses, so the lift below ends the routine instead.
+    // Touches that disagree (the bit rests on the plate) or a refusal before any motion are redone: lift clear
+    // and ask again. Anything else ends the pass: no contact means the bit went 20 mm down into whatever was
+    // there and may have lost steps, and STOP is STOP.
     for (let error = null; ;) {
       await io.step({
         title: `Corner ${c.name}: tape and plate`,
@@ -86,6 +88,7 @@ export async function calibrate(io) {
         c.probed = await io.probe() // { x, y, z }: where the dot will be, in machine coordinates
         break
       } catch (e) {
+        if (!e.retry) throw e
         error = `${e.message}${/[.?!]$/.test(e.message) ? '' : '.'} The bit was lifted ${LIFT_MM} mm; probe this corner again.`
         io.busy(`Probe failed; lifting ${LIFT_MM} mm…`)
         await g('G91')
@@ -168,8 +171,6 @@ export async function calibrate(io) {
 
   // Pull-off: `delta` is how much too far from its switch the X-max side sits. Lower means further from a top
   // switch; further +Y means further from a Y-min switch. The opposite homing direction flips the sign.
-  // FluidNC's homing/positive_direction defaults to true.
-  const homesPositive = axis => getValue(config.text, `axes/${axis}/homing/positive_direction`) !== 'false'
   // One review entry per checkbox; an axis's two pull-offs go together, since one without the other moves the origin.
   const changes = []
   const pulloffs = (axis, delta, motor0AtXmax, what, measured) => {
@@ -178,15 +179,15 @@ export async function calibrate(io) {
     if (!(p0 >= 0 && p1 >= 0)) return notes.push(`No twin-motor pull-off found for ${axis.toUpperCase()}; ${what} not corrected.`)
     const [n0, n1] = splitPulloff({ p0, p1, delta, motor0AtXmax })
     if (Math.max(Math.abs(n0 - p0), Math.abs(n1 - p1)) > MAX_PULLOFF_STEP) {
-      throw new Error(`This pass would change the ${axis.toUpperCase()} pull-offs by ${fmt(n0 - p0)} and ${fmt(n1 - p1)} mm (${what}: ${fmt(measured)} mm across the gantry), more than ${MAX_PULLOFF_STEP} mm per pass, so nothing was changed. Check the measurements and the gantry span, then run the pass again.`)
+      throw new Error(`This pass would change the ${axis.toUpperCase()} pull-offs by ${fmt(n0 - p0)} and ${fmt(n1 - p1)} mm (${what}: ${fmt(measured)} mm across the gantry), more than ${MAX_PULLOFF_STEP} mm per pass, so nothing was changed. Check the measurements and the gantry span. If they are right, the machine is further out than one pass corrects: square it by hand, or correct the pull-offs in steps of up to ${MAX_PULLOFF_STEP} mm, then run the pass again.`)
     }
     const edits = [['motor0', p0, n0], ['motor1', p1, n1]]
       .filter(([, old, now]) => fmt(old) !== fmt(now))
       .map(([motor, old, now]) => ({ path: `axes/${axis}/${motor}/pulloff_mm`, label: motor, old: fmt(old), new: fmt(now) }))
     if (edits.length) changes.push({ key: what, label: `${axis.toUpperCase()} pull-offs (${what})`, edits })
   }
-  pulloffs('z', (homesPositive('z') ? 1 : -1) * tiltMm, zMotor0AtXmax, 'tilt', tiltMm)
-  pulloffs('y', (homesPositive('y') ? -1 : 1) * skewMm, yMotor0AtXmax, 'squareness', skewMm)
+  pulloffs('z', (homesPositive(config.text, 'z') ? 1 : -1) * tiltMm, zMotor0AtXmax, 'tilt', tiltMm)
+  pulloffs('y', (homesPositive(config.text, 'y') ? -1 : 1) * skewMm, yMotor0AtXmax, 'squareness', skewMm)
 
   const scale = (axis, commanded, a, b) => {
     if (!(a > 0 && b > 0)) return

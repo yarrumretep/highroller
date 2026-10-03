@@ -241,14 +241,16 @@ test('a pull-off change of more than 3 mm on a motor is refused', async () => {
     probes: [-40, -34, -34, -40], // touches 6 mm higher on the X-max side: 6.4 mm of tilt across the span
     answers: [{ ac: d(1120, 2340), bd: d(1120, 2340), ab: null, dc: null, ad: null, bc: null }],
   })
-  await assert.rejects(calibrate(io), /Z pull-offs by 3\.429 and -3\.000 mm \(tilt: 6\.429 mm across the gantry\).*more than 3 mm.*Check the measurements/)
+  await assert.rejects(calibrate(io), /Z pull-offs by 3\.429 and -3\.000 mm \(tilt: 6\.429 mm across the gantry\).*more than 3 mm.*Check the measurements.*If they are right.*square it by hand/)
   assert.equal(rec.review, null)
   assert.equal(rec.applied, null)
 })
 
-test('a failed probe lifts 5 mm and repeats that corner, as often as it fails; STOP still ends the routine', async () => {
+const redo = message => Object.assign(new Error(message), { retry: true }) // as probeZ marks one that can be tried again
+
+test('a probe that can be redone lifts 5 mm and repeats that corner, as often as it fails; a miss or STOP ends the pass', async () => {
   const { io, rec } = scripted({
-    probes: [new Error('Touches differ by 0.100 mm.'), new Error('No contact.'), -40, -40, -40, -40],
+    probes: [redo('Touches differ by 0.100 mm.'), redo('G91 refused: error 9'), -40, -40, -40, -40],
     answers: [{ ac: d(1120, 2340), bd: d(1120, 2340), ab: null, dc: null, ad: null, bc: null }],
   })
   await calibrate(io)
@@ -256,9 +258,15 @@ test('a failed probe lifts 5 mm and repeats that corner, as often as it fails; S
   assert.equal(tape.length, 3)
   assert.equal(tape[0].error, null)
   assert.match(tape[1].error, /Touches differ by 0.100 mm\..*lifted 5 mm/)
-  assert.match(tape[2].error, /No contact\./)
+  assert.match(tape[2].error, /^G91 refused: error 9\. The bit was lifted/)
   const a = rec.sent.indexOf('G53 G0 X53 Y53')
   assert.deepEqual(rec.sent.slice(a + 1, a + 8), ['G4 P0', 'G91', 'G0 Z5', 'G90', 'G91', 'G0 Z5', 'G90'])
+
+  // No contact: the bit went the whole way down, so the pass ends with the probe's message, without a lift
+  const miss = scripted({ probes: [new Error('No contact: is the plate under the bit and the clip attached?')], answers: [] })
+  await assert.rejects(calibrate(miss.io), /^Error: No contact/)
+  assert.ok(!miss.rec.sent.includes('G0 Z5'))
+  assert.equal(miss.rec.steps.filter(st => st.title === 'Corner A: tape and plate').length, 1)
 
   // STOP: the probe ends with "Stopped" and every later send refuses, so nothing is lifted or asked again
   const stopped = new Error('Stopped')

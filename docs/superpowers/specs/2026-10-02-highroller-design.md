@@ -89,7 +89,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 - **Downloads while the machine moves.** On 4.x, WebDAV answers `/sd/<name>`, so downloads work during a job. On 3.x they are refused while the machine moves.
 - **Dev server.** It proxies `/upload`, `/sd/`, `/files` and the flash files the app reads (`/<name>.yaml`, `.json`, `.bak`) to the board or the fake, so the app's relative URLs work the same in development as on the board.
 - **This machine runs FluidNC 3.9.9:** websocket on port 81, and downloads are refused while moving.
-- FluidNC serves a flash file over HTTP at `/<name>` while the machine is idle (or in alarm) and refuses during motion. So the app reads the config file and `highroller.json` that way while idle, on every connection, and keeps them in memory. The text is the file's exact bytes. `$LocalFS/Show` is not used for them: FluidNC broadcasts `[MSG:…]`, `[PRB:…]` and `ALARM:` lines to every client, and they land among its lines; it also truncates lines over 254 characters and drops blank ones.
+- FluidNC serves a flash file over HTTP at `/<name>` while the machine is idle (or in alarm) and refuses during motion. So the app reads the config file and `highroller.json` that way while idle, on every connection (after a reconnect mid-job the old copy is kept until the job is over), and keeps them in memory. The text is the file's exact bytes. `$LocalFS/Show` is not used for them: FluidNC broadcasts `[MSG:…]`, `[PRB:…]` and `ALARM:` lines to every client, and they land among its lines; it also truncates lines over 254 characters and drops blank ones.
 - The current job's G-code is cached in the browser (IndexedDB), so a page reload during a cut doesn't have to download the file again.
 
 **Active config file:** found with `$Config/Filename`. It is normally `config.yaml`.
@@ -198,8 +198,8 @@ Because the trail only needs the file and the current progress, it rebuilds itse
 - **Probing:** the touch plate is probed the same way everywhere (the Z0 helper and the wizards):
   1. The bit parks above the spot. The user places the plate, attaches the clip, then touches the plate to the bit and holds it for about a second. The Probe button only becomes available after the status report shows the probe circuit (`Pn:P`) close and open again. This prevents the crash where the clip is off and the bit drives into the plate.
   2. Fast search with `G38.2` at 300 mm/min, going at most 20 mm below the start, then back off 1 mm.
-  3. Three slow touches at 25 mm/min, backing off 1 mm between them. The result is the middle (median) value, and the touch position (`[PRB:x,y,z:1]`, machine coordinates). If the three readings differ by more than 0.05 mm, the point is rejected and has to be redone: a wizard lifts 5 mm and shows that point's step again with the reason, as often as it fails (STOP still ends it).
-  4. If the probe never makes contact, FluidNC raises an alarm. The wizard stops and says why.
+  3. Three slow touches at 25 mm/min, backing off 1 mm between them. The result is the middle (median) value, and the touch position (`[PRB:x,y,z:1]`, machine coordinates). If the three readings differ by more than 0.05 mm, the point is rejected and has to be redone: a wizard lifts 5 mm and shows that point's step again with the reason, as often as it fails (STOP still ends it). The same goes for a probe refused before anything moved.
+  4. If the probe never makes contact, FluidNC raises an alarm (the bit went the whole 20 mm down into whatever was there and may have lost steps). The wizard stops and says why. So does a probe that starts with the plate already touching (ALARM:4).
 - **Travel height:** at a wizard's first point, the user jogs the bit to about 5–10 mm above the plate. Moves to later points happen at the first touch height + 10 mm.
 
 ### Applying config changes
@@ -229,7 +229,7 @@ One pass measures Z tilt, squareness and X/Y steps per mm from four V-bit dots o
    - Tilt = the average of (zB − zA)/(xB − xA) and (zC − zD)/(xC − xD) from the probe heights (machine Z). Positive means the X-max side is lower. δz = tilt × span.
    - Skew θ = ((AC² − BD²) − (AC₀² − BD₀²))/(4·W·H), where AC₀ and BD₀ are the diagonals of the probed positions (equal for a true rectangle) and W, H the mean probed side lengths; δy = θ × span. Positive means the X-max side sits further along +Y.
    - steps/mm = current × commanded ÷ the mean of the two measured sides, only when both sides of an axis were entered; "commanded" is the mean of the two probed side lengths.
-   - Pull-off: `delta` is how much too far from its switch the X-max side sits. With Z homing to the top, lower means farther, so delta = +δz; with Y homing to Y-min, further +Y means farther, so delta = +δy. The opposite homing direction flips the sign. The X-max motor pulls off delta/2 less and the other delta/2 more, so the origin doesn't move. No pull-off goes below 1 mm: if one would, both are raised so the lower one is exactly 1 mm. A pass that would change any pull-off by more than 3 mm is refused, with the numbers it computed and a request to check the measurements.
+   - Pull-off: `delta` is how much too far from its switch the X-max side sits. With Z homing to the top, lower means farther, so delta = +δz; with Y homing to Y-min, further +Y means farther, so delta = +δy. The opposite homing direction flips the sign. The X-max motor pulls off delta/2 less and the other delta/2 more, so the origin doesn't move. No pull-off goes below 1 mm: if one would, both are raised so the lower one is exactly 1 mm. A pass that would change any pull-off by more than 3 mm is refused, with the numbers it computed and a request to check the measurements; if they are right, the machine needs squaring by hand (or correcting in steps) first.
 5. **Review and apply:** every change as old → new with a checkbox (an axis's two pull-offs share one), plus the tilt and skew in mm across the gantry. Apply follows "Applying config changes" above. The motor-side swap and the last-pass tilt or skew are saved only for an axis whose change was applied.
 6. **Check:** fresh tape on the same spots and run again; the second pass shows what error remains.
 
@@ -272,7 +272,7 @@ Settings are read from the board once the config has been read (both need the ma
 
 - **Dropped connection:** the app reconnects automatically, waiting a little longer after each failed attempt. A banner reads "Reconnecting, the machine is still running".
 - **On connect or reconnect:**
-  1. Read the machine state, the config file and then `highroller.json` (the board's copy wins after a reconnect). Whether the machine has been homed is unknown again until the next `[MSG:Homed…]`.
+  1. Read the machine state, the config file and then `highroller.json` (the board's copy wins after a reconnect). Which axes are homed is unknown again: FluidNC prints `[MSG:Homed:<axes>]` once per homing cycle (the stock LowRider homes Z, then XY), and each line marks its axes; an alarm that loses the position (1, 3, 6, 8, 9, 13) clears them. Moves in machine coordinates need their axes homed: tap-to-go X and Y, Raise Z Z, a typed destination its own axis.
   2. If `SD:` shows a job running, load that file and rebuild the preview and trail.
 
 ## Testing

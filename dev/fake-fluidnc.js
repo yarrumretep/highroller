@@ -234,7 +234,7 @@ export function start(port = 8081) {
     if (l === '$H') {
       m.state = 'Home'
       status()
-      setTimeout(() => { m.mpos = [0, 0, 0]; m.state = 'Idle'; status(); broadcast('[MSG:Homed:XYZ]'); ok() }, HOME_MS)
+      setTimeout(() => { m.mpos = [0, 0, 0]; m.state = 'Idle'; status(); broadcast('[MSG:Homed:Z]'); broadcast('[MSG:Homed:XY]'); ok() }, HOME_MS) // one line per homing cycle: Z, then XY
       return
     }
     const q = /^\$\/AXES\/([XYZ])\/MAX_RATE_MM_PER_MIN$/.exec(l)

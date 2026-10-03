@@ -19,27 +19,36 @@ export function probeLines(opts = {}) {
   return lines
 }
 
+// A failed probe throws; `e.retry` is true when it can simply be tried again: nothing had moved yet, or the
+// touches disagreed with the bit resting on the plate. A miss (the bit went the whole way down) is not.
+const fail = (message, retry = false) => Object.assign(new Error(message), { retry })
+
 export async function probeZ(fnc, opts = {}) {
   const o = { ...DEFAULTS, ...opts }
   if (!(o.touches >= 1)) throw new Error('touches must be at least 1')
   const quiet = line => fnc.send(line, { quiet: true })
-  let missed = false
-  let at // x, y of the last touch
+  let alarmed = false
+  let at // x, y of the last touch; unset while nothing has moved yet
   const probe = async (mm, feed) => {
     const r = await fnc.send(probeCmd(mm, feed))
-    // A miss prints [PRB:…:0] and ALARM:5 before the reply; FluidNC is then in alarm.
-    if (r.lines.some(l => /^\[PRB:[^\]]*:0\]/.test(l) || l.startsWith('ALARM:5'))) {
-      missed = true
-      throw new Error('No contact: is the plate under the bit and the clip attached?')
+    // FluidNC prints these before the reply and is then in alarm: ALARM:4, the probe was already closed at the
+    // start; a miss, [PRB:…:0] and ALARM:5.
+    if (r.lines.some(l => l.startsWith('ALARM:4'))) {
+      alarmed = true
+      throw fail('The plate was already touching the bit when probing started. Make sure it is clear of the bit before probing.')
     }
-    if (!r.ok) throw new Error(`Probe refused: error ${r.error}`)
+    if (r.lines.some(l => /^\[PRB:[^\]]*:0\]/.test(l) || l.startsWith('ALARM:5'))) {
+      alarmed = true
+      throw fail('No contact: is the plate under the bit and the clip attached?')
+    }
+    if (!r.ok) throw fail(`Probe refused: error ${r.error}`, !at)
     const [x, y, z] = prb(r.lines)
-    if (![x, y, z].every(Number.isFinite)) throw new Error('Probe refused: no [PRB:] report')
+    if (![x, y, z].every(Number.isFinite)) throw fail('Probe refused: no [PRB:] report')
     at = { x, y }
     return z
   }
   const g91 = await quiet('G91')
-  if (!g91.ok) throw new Error(`G91 refused: error ${g91.error}`) // in absolute mode G38.2 Z-20 would head for work Z -20
+  if (!g91.ok) throw fail(`G91 refused: error ${g91.error}`, true) // in absolute mode G38.2 Z-20 would head for work Z -20
   try {
     await probe(o.maxDown, o.fast)
     const touches = []
@@ -49,14 +58,14 @@ export async function probeZ(fnc, opts = {}) {
     }
     const sorted = [...touches].sort((a, b) => a - b)
     const spread = sorted.at(-1) - sorted[0]
-    if (spread > o.tolerance) throw new Error(`Touches differ by ${spread.toFixed(3)} mm. Clean the plate and try again.`)
+    if (spread > o.tolerance) throw fail(`Touches differ by ${spread.toFixed(3)} mm. Clean the plate and try again.`, true)
     const n = sorted.length
     const z = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
     return { ...at, z, spread, touches }
   } finally {
-    // After a miss FluidNC is in alarm ("position may be lost") and refuses G-code until unlocked.
+    // After a miss or ALARM:4 FluidNC is in alarm and refuses G-code until unlocked (neither loses the position).
     // A G90 refused for some other reason does not mean an alarm that $X should clear.
-    if (missed) await quiet('$X')
+    if (alarmed) await quiet('$X')
     await quiet('G90')
   }
 }

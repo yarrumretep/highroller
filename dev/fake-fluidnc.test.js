@@ -4,6 +4,7 @@ import { start } from './fake-fluidnc.js'
 import { FluidNC } from '../src/lib/fluidnc.js'
 import { wifiPercent } from '../src/lib/status.js'
 import { probeZ } from '../src/lib/probe.js'
+import { homedAfter } from '../src/lib/homing.js'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -53,7 +54,7 @@ test('two clients stay connected at once, like FluidNC 4.x', async () => {
   }
 })
 
-test('messages are broadcast: one client\'s $RI=, and homing, reach the other client', async () => {
+test('messages are broadcast: one client\'s $RI=, and homing (one line per cycle), reach the other client', async () => {
   const server = start(8103)
   const lines = [[], []]
   const clients = lines.map(l => new FluidNC({ host: 'localhost:8103', onLine: line => l.push(line) }))
@@ -66,9 +67,15 @@ test('messages are broadcast: one client\'s $RI=, and homing, reach the other cl
     assert.equal((await clients[0].send('$RI=50', { quiet: true })).ok, true)
     await sleep(100)
     assert.deepEqual(lines[1], ['[MSG:INFO: auto report interval set to 50]'])
+    lines[1].length = 0
     assert.equal((await clients[0].send('$HZ', { quiet: true })).ok, true)
     await sleep(100)
-    assert.ok(lines[1].includes('[MSG:Homed:Z]'), lines[1].join('|'))
+    assert.deepEqual(lines[1].filter(l => l.startsWith('[MSG:Homed')), ['[MSG:Homed:Z]'])
+    assert.deepEqual(lines[1].reduce(homedAfter, {}), { Z: true }) // Home Z alone does not unlock X/Y
+    lines[1].length = 0
+    assert.equal((await clients[0].send('$H', { quiet: true })).ok, true)
+    await sleep(100)
+    assert.deepEqual(lines[1].filter(l => l.startsWith('[MSG:Homed')), ['[MSG:Homed:Z]', '[MSG:Homed:XY]']) // the LowRider's two cycles
   } finally {
     for (const fnc of clients) fnc.close()
     server.close()

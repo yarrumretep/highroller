@@ -47,7 +47,7 @@
       wpos={machine.status.wpos}
       wco={machine.status.wco}
       range={machine.config?.range ?? null}
-      canGo={machine.conn === 'open' && machine.status.state === 'Idle' && !job.running && machine.homed}
+      canGo={machine.conn === 'open' && machine.status.state === 'Idle' && !job.running && machine.homed.X && machine.homed.Y}
       onGo={goTo}
     />
     <Job />

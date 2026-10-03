@@ -5,6 +5,7 @@ import { stopMachine } from './stop.js'
 import { readFlash } from './flash.js'
 import { getValue } from './yaml-edit.js'
 import { axisRange } from './calib.js'
+import { homedAfter, homesPositive } from './homing.js'
 
 const LOG_MAX = 500
 
@@ -19,10 +20,10 @@ export const machine = $state({
   stopping: false,
   wifi: null,
   config: null,
-  homed: false, // a homing cycle has finished since this connection opened and the controller last restarted
+  homed: {}, // { X: true, … }: axes homed since this connection opened and since any alarm that loses the position
 })
 
-function log(line) {
+export function log(line) {
   machine.log.push(line)
   if (machine.log.length > LOG_MAX) machine.log.splice(0, machine.log.length - LOG_MAX)
 }
@@ -48,14 +49,14 @@ export const fnc = new FluidNC({
   onStatus: s => {
     machine.status = s
     if (s.state !== 'Alarm') machine.alarm = null
-    if (!machine.config && !loadingConfig && (s.state === 'Idle' || s.state === 'Alarm') && Date.now() - configFailedAt > CONFIG_RETRY_MS) reloadConfig().catch(() => {})
+    if ((!machine.config || configStale) && !loadingConfig && (s.state === 'Idle' || s.state === 'Alarm') && Date.now() - configFailedAt > CONFIG_RETRY_MS) reloadConfig().catch(() => {})
     if (idle(s)) flushIdle()
   },
   onLine: line => {
     const m = /^ALARM:(\d+)/.exec(line)
     if (m) machine.alarm = Number(m[1])
-    if (line.startsWith('[MSG:Homed')) machine.homed = true
-    else if (line.startsWith('Grbl ')) machine.homed = false // the restart banner
+    const homed = homedAfter(machine.homed, line)
+    if (homed !== machine.homed) machine.homed = homed
     if (line !== 'ok') log(line)
   },
   onConnection: c => {
@@ -64,9 +65,10 @@ export const fnc = new FluidNC({
     machine.wifi = null
     if (c === 'open') {
       machine.everOpen = true
-      machine.homed = false
-      // Read the config again (the idle trigger above does it): it may have changed while the link was down.
-      machine.config = null
+      machine.homed = {}
+      // Read the config again (the idle trigger above does it, once no job runs): it may have changed while the
+      // link was down. The old copy stays until then, so a phone waking mid-job keeps the outline and its view.
+      configStale = true
       configFailedAt = 0
       fnc.jogCancel() // cancel any jog left running from before the link dropped
       runWhenIdle(readMaxRates)
@@ -97,6 +99,7 @@ async function readWifi() {
 }
 
 let loadingConfig = false
+let configStale = false // the link dropped since machine.config was read
 let configFailedAt = 0
 const CONFIG_RETRY_MS = 10000 // a failed read is retried this often, not on every status report
 
@@ -107,7 +110,7 @@ function rangesOf(text) {
     const a = axis.toLowerCase()
     const maxTravel = Number(getValue(text, `axes/${a}/max_travel_mm`))
     const mposMm = Number(getValue(text, `axes/${a}/homing/mpos_mm`) ?? 0)
-    const positive = getValue(text, `axes/${a}/homing/positive_direction`) !== 'false' // FluidNC's default is true
+    const positive = homesPositive(text, a)
     if (!(maxTravel > 0)) return null
     range[axis] = axisRange({ maxTravel, mposMm, positive })
   }
@@ -122,6 +125,7 @@ export async function reloadConfig() {
     const r = await fnc.send('$Config/Filename', { quiet: true })
     const name = r.lines.find(l => l.startsWith('$Config/Filename='))?.split('=')[1] || 'config.yaml'
     const text = await readFlash(name)
+    configStale = false
     return (machine.config = { name, text, range: rangesOf(text) })
   } catch (e) {
     configFailedAt = Date.now()

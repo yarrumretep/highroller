@@ -1,4 +1,4 @@
-import { machine, runWhenIdle } from './machine.svelte.js'
+import { machine, runWhenIdle, log } from './machine.svelte.js'
 import { readFlash, writeFlash } from './flash.js'
 
 // Settings live on the board (highroller.json on its flash) so phone and desktop share them.
@@ -37,7 +37,8 @@ let loading = null
 
 // Reads the board's copy, once per connection; resolves true once it has been read (or found missing).
 // After a reconnect the board's copy wins outright, so another device's changes (or a calibration pass's) are kept.
-// ponytail: a change made while disconnected, or still waiting to be written when the link dropped, is lost.
+// ponytail: a change made while disconnected, or before the board's copy has been read again (the config is
+// read first, once no job runs), or still waiting to be written when the link dropped, is lost.
 export function loadSettings() {
   if (onBoard) return Promise.resolve(true)
   return (loading ??= loadFromBoard().finally(() => { loading = null }))
@@ -46,11 +47,16 @@ export function loadSettings() {
 async function loadFromBoard() {
   let board = null
   try {
-    board = JSON.parse(await readFlash(FILE))
+    const text = await readFlash(FILE)
+    try {
+      board = JSON.parse(text)
+    } catch (e) {
+      throw new Error(`${FILE} is corrupt (${e.message}); fix or delete it with the stock WebUI`)
+    }
   } catch (e) {
     if (e.status !== 404) {
-      // busy, unreachable or unreadable: nothing is written over a copy that couldn't be read
-      console.warn('Settings not read:', e.message)
+      // busy, unreachable or corrupt: nothing is written over a copy that couldn't be read
+      log(`Settings not read: ${e.message}`)
       if (e.status) setTimeout(() => runWhenIdle(retry), RETRY_MS) // the board answered but refused: it was busy
       return false
     }

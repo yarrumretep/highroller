@@ -43,13 +43,13 @@ test('finds the plate fast, backs off, touches three times slowly, and returns t
 
 test('rejects touches that disagree by more than the tolerance', async () => {
   const f = fakeFnc([-50, -50, -50.1, -50])
-  await assert.rejects(probeZ(f), /Touches differ by 0.100 mm/)
+  await assert.rejects(probeZ(f), e => /Touches differ by 0.100 mm/.test(e.message) && e.retry === true) // resting on the plate: can be redone
   assert.equal(f.sent.at(-1), 'G90')
 })
 
 test('no contact stops at once with a clear error, and unlocks (only after a detected miss) to restore G90', async () => {
   const f = fakeFnc([])
-  await assert.rejects(probeZ(f), /No contact/)
+  await assert.rejects(probeZ(f), e => /No contact/.test(e.message) && !e.retry) // the bit went 20 mm down: not to be redone blindly
   assert.deepEqual(f.sent, ['G91', 'G38.2 Z-20 F300', '$X', 'G90'])
 })
 
@@ -71,8 +71,33 @@ test('a refused G91 stops before any probe move', async () => {
   const f = fakeFnc([-5, -5, -5, -5])
   const real = f.send
   f.send = line => (line === 'G91' ? (f.sent.push(line), Promise.resolve({ ok: false, error: 9, lines: [] })) : real(line))
-  await assert.rejects(probeZ(f), /G91 refused: error 9/)
+  await assert.rejects(probeZ(f), e => /G91 refused: error 9/.test(e.message) && e.retry === true) // nothing moved
   assert.deepEqual(f.sent, ['G91'])
+})
+
+test('a plate already touching at the start (ALARM:4) is said plainly, unlocked, and not redone', async () => {
+  const f = fakeFnc([])
+  const real = f.send
+  f.send = line => {
+    if (!line.includes('G38.2')) return real(line)
+    f.sent.push(line)
+    f.alarm = true
+    return Promise.resolve({ ok: true, error: null, lines: ['ALARM:4'] })
+  }
+  await assert.rejects(probeZ(f), e => /already touching the bit/.test(e.message) && !e.retry)
+  assert.deepEqual(f.sent, ['G91', 'G38.2 Z-20 F300', '$X', 'G90'])
+})
+
+test('a refused probe can be redone only if nothing had moved yet', async () => {
+  const refuse = n => {
+    const f = fakeFnc([-5, -5, -5, -5])
+    const real = f.send
+    let probes = 0
+    f.send = line => (line.includes('G38.2') && ++probes === n ? (f.sent.push(line), Promise.resolve({ ok: false, error: 9, lines: [] })) : real(line))
+    return probeZ(f)
+  }
+  await assert.rejects(refuse(1), e => /Probe refused: error 9/.test(e.message) && e.retry === true)
+  await assert.rejects(refuse(2), e => /Probe refused: error 9/.test(e.message) && !e.retry)
 })
 
 test('options change the feeds, distances and touch count', async () => {

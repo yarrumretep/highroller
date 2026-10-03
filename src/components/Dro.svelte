@@ -50,7 +50,7 @@
     await cmd('G0 X0 Y0')
   })
   const raise = () => run('Raising…', async () => {
-    if (!machine.homed) throw new Error('Home the machine first.') // G53 needs a known machine position
+    if (!machine.homed.Z) throw new Error('Home Z first.') // G53 needs a known machine position
     await cmd(`G53 G0 Z${top}`)
   })
 
@@ -74,7 +74,7 @@
     const m = machineCoords ? v : v + wco[i] // the machine editor's value is already a machine coordinate
     const range = machine.config?.range?.[AXES[i]]
     if (range && (m < range.min || m > range.max)) { error = `${AXES[i]} travel is ${range.min.toFixed(3)} to ${range.max.toFixed(3)}.`; return }
-    if (!machine.homed) { error = 'Home the machine first.'; return }
+    if (!machine.homed[AXES[i]]) { error = `Home ${AXES[i]} first.`; return } // G53 needs that axis's machine position
     edit = null
     run('Moving…', () => cmd(`G53 G0 ${AXES[i]}${Math.round(m * 1000) / 1000}`))
   }
@@ -115,7 +115,7 @@
     <!-- Enabled before the plate has touched: pressing it then shows the hint (a disabled button cannot be tapped for help) -->
     <button class:go={armed} disabled={!idle || !!busy} onclick={() => (armed ? probe() : (hint = true))} title={HINT}>Probe Z0</button>
     <button disabled={!idle || !!busy || top == null || !machine.status.wpos} onclick={goXY0}>Go to XY0</button>
-    <button disabled={!idle || !!busy || top == null || !machine.homed} onclick={raise}>Raise Z</button>
+    <button disabled={!idle || !!busy || top == null || !machine.homed.Z} onclick={raise}>Raise Z</button>
   </div>
   <div class="homes">
     <button disabled={!canHome || !!busy} onclick={() => home('')}>Home all</button>

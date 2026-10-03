@@ -23,7 +23,8 @@
 - Files on flash are read over HTTP (`readFlash(name)`: `GET /<name>`, exact bytes; 404 → "no file", otherwise "the board is busy"), not with `$LocalFS/Show`, whose lines other clients' `[MSG:]`/`[PRB:]`/`ALARM:` broadcasts interleave with (and which truncates long lines and drops blank ones). The fake serves `/<name>` (503 while moving) and broadcasts those lines; the dev server proxies `/<name>.yaml|json|bak`.
 - The config and `highroller.json` are read again on every connection; after a reconnect the board's settings win outright. A pass reads the config fresh before "Before you start", and Apply re-reads it and refuses if it changed or if the edit doesn't keep the file's shape.
 - Settings are written only while the machine is Idle or Alarm with no job (otherwise once idle); only a missing file (404) leads to writing the defaults.
-- Corner A's height step has a Z-only jog pad; the maths uses the probe's own x, y (`probeZ` returns `{x, y, z, spread, touches}`); measurements more than 1 % or 10 mm off are asked again; a pull-off change over 3 mm per motor is refused; a failed probe lifts 5 mm and repeats the corner.
+- Corner A's height step has a Z-only jog pad; the maths uses the probe's own x, y (`probeZ` returns `{x, y, z, spread, touches}`); measurements more than 1 % or 10 mm off are asked again; a pull-off change over 3 mm per motor is refused; touches that disagree (or a probe refused before anything moved, `e.retry`) lift 5 mm and repeat the corner, while no contact or ALARM:4 ends the pass.
+- `machine.homed` is per axis (`{ X, Y, Z }`), from FluidNC's one `[MSG:Homed:<axes>]` line per homing cycle, cleared on connect and on alarms that lose the position; `homesPositive()` reads `positive_direction` as FluidNC does (absent → true, else "true" ignoring case).
 - `<name>.bak` is written only if it isn't on the flash yet (`GET /files`).
 
 ## Global Constraints
