@@ -81,9 +81,10 @@
     border-top: 1px solid var(--line);
   }
   .tabs .on { color: white; background: var(--accent); border-color: var(--accent); }
-  @media (max-width: 899px) { .off { display: none; } }
-  @media (min-width: 900px) {
-    main { grid-template-columns: minmax(340px, 420px) minmax(0, 1fr) minmax(300px, 400px); padding-bottom: 12px; }
+  @media (max-width: 999px) { .off { display: none; } }
+  @media (min-width: 1000px) {
+    /* Three columns that share the width: fixed side maxima left the middle 156 px at 1024 px, and its panels spilled over */
+    main { grid-template-columns: minmax(340px, 1fr) minmax(280px, 1.3fr) minmax(320px, 1fr); padding-bottom: 12px; }
     main > section:nth-child(3), main > section:nth-child(4) { grid-column: 3; }
     main > section:nth-child(1), main > section:nth-child(2) { grid-row: span 2; }
     .tabs { display: none; }

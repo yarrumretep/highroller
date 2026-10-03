@@ -104,7 +104,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 
 **Layouts**
 - **Phone:** bottom tabs: Jog · Job · Tools · More.
-- **Desktop (900 px and wider):** one dashboard. Position readout, jog pad and zeroing sit on the left, the preview in the centre, and job controls and overrides on the right. Tools and More open as panels.
+- **Desktop (1000 px and wider):** one dashboard. Position readout, jog pad and zeroing sit on the left, the preview in the centre, and job controls and overrides on the right. Tools and More open as panels.
 - **Desktop keyboard:** arrow keys jog X and Y, PgUp and PgDn jog Z, and `[` and `]` change the step size.
 
 **Jog tab**

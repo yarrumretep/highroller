@@ -290,5 +290,5 @@
   .lines pre, pre.lines { margin: 0; padding: 8px 10px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
   input[type='number'] { width: 120px; min-height: 44px; padding: 0 8px; font-size: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
   input[type='checkbox'] { width: 22px; height: 22px; }
-  @media (min-width: 900px) { dialog { height: auto; max-height: 90vh; margin: 5vh auto; border-radius: 14px; } }
+  @media (min-width: 1000px) { dialog { height: auto; max-height: 90vh; margin: 5vh auto; border-radius: 14px; } }
 </style>

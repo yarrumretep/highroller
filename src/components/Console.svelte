@@ -37,5 +37,5 @@
   .err { color: var(--bad); }
   form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
   input { min-height: 44px; padding: 0 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
-  @media (min-width: 900px) { .console { height: 45vh; } }
+  @media (min-width: 1000px) { .console { height: 45vh; } }
 </style>

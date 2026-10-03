@@ -45,7 +45,7 @@
   - Probing never starts until the status report has shown the probe input close and open again (`Pn:P`), proving the clip is connected.
   - Config changes are shown as old → new and need a confirmation; the original is saved as `<name>.bak` first, unless a `.bak` is already on the flash.
   - STOP stays available inside the wizard dialog.
-- **UI:** touch targets ≥ 44 px; phone layout below 900 px (tabs Jog · Job · Tools · More); desktop at ≥ 900 px.
+- **UI:** touch targets ≥ 44 px; phone layout below 1000 px (tabs Jog · Job · Tools · More); desktop at ≥ 1000 px.
 - **Comments:** short, only where they explain why; `ponytail:` marks deliberate simplifications.
 
 ## File Structure

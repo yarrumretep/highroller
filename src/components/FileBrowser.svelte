@@ -113,5 +113,5 @@
   .newfolder .go { margin-left: 0; }
   a.button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--btn); color: inherit; text-decoration: none; }
   footer { flex-wrap: wrap; }
-  @media (min-width: 900px) { dialog { height: 80vh; max-height: 80vh; margin: 10vh auto; border-radius: 14px; } }
+  @media (min-width: 1000px) { dialog { height: 80vh; max-height: 80vh; margin: 10vh auto; border-radius: 14px; } }
 </style>
