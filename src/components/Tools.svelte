@@ -1,8 +1,8 @@
 <script>
-  import { machine } from '../lib/machine.svelte.js'
+  import { machine, send } from '../lib/machine.svelte.js'
   import { settings } from '../lib/settings.svelte.js'
   import { job, upload, refresh, noJob } from '../lib/job.svelte.js'
-  import { flatness, zeroBlocked, zeroAt } from '../lib/flatness.svelte.js'
+  import { flatness, stale, zeroBlocked, zeroAt } from '../lib/flatness.svelte.js'
   import { resultLines } from '../lib/flatnessProbe.js'
   import { surfacingGcode, surfacingName } from '../lib/surfacing.js'
 
@@ -22,7 +22,7 @@
   $effect(() => { flatness.last; zeroed = '' }) // a new map: its zero has not been set yet
 
   const cut = $state({ diameter: 25.4, stepoverPct: 40, depth: 0.5, depthPerPass: 0.5, feed: 2500, plungeFeed: 300, safeZ: 5 })
-  $effect(() => { const d = flatness.last?.report.depth; if (d > 0) cut.depth = d }) // a new map's depth, until it is edited
+  $effect(() => { const d = flatness.last?.report.depth; cut.depth = d > 0 ? d : 0.5 }) // each new map's depth (or none), until it is edited
   const FIELDS = [
     ['diameter', 'Cutter diameter', 'mm', 0.1],
     ['stepoverPct', 'Stepover', '%', 1],
@@ -33,26 +33,26 @@
     ['safeZ', 'Safe height', 'mm', 1],
   ]
 
-  // Machine coordinates: the probed rectangle, else the travel less the margin
+  // The whole reachable table, in machine coordinates: the travel inset by the cutter's radius + 1 mm on every side,
+  // so a row's overshoot of one radius past each end stays inside the travel.
   const area = $derived.by(() => {
-    if (flatness.last) return flatness.last.area
     const r = machine.config?.range
-    if (!r) return null
-    const m = settings.marginMm
-    return { xMin: r.X.min + m, xMax: r.X.max - m, yMin: r.Y.min + m, yMax: r.Y.max - m }
+    if (!r || !(cut.diameter > 0)) return null
+    const inset = cut.diameter / 2 + 1
+    return { xMin: r3(r.X.min + inset), xMax: r3(r.X.max - inset), yMin: r3(r.Y.min + inset), yMax: r3(r.Y.max - inset) }
   })
   const W = $derived(area ? r3(area.xMax - area.xMin) : 0)
   const H = $derived(area ? r3(area.yMax - area.yMin) : 0)
+  const originLine = $derived(area ? `G10 L2 P1 X${area.xMin} Y${area.yMin}` : '') // work X0 Y0 at the cut's corner; Z0 is left alone
   const blocked = $derived.by(() => {
-    const range = machine.config?.range
-    if (!range || !area) return "Waiting for the machine's config (it is read while idle)"
+    if (!machine.config?.range) return "Waiting for the machine's config (it is read while idle)"
     if (machine.conn !== 'open') return 'Not connected'
     if (!noJob()) return 'Wait until the job has finished'
+    if (machine.status.state !== 'Idle') return `Wait for Idle (now ${machine.status.state})`
+    if (!(machine.homed.X && machine.homed.Y)) return 'Home X and Y first: the corner is in machine coordinates'
+    if (flatness.last && stale(flatness.last)) return stale(flatness.last)
     if (!FIELDS.every(([k]) => cut[k] > 0) || cut.stepoverPct > 100) return 'Every field needs a number above 0 (stepover up to 100 %)'
-    if (!(W > 0 && H > 0)) return 'The area is empty: lower the margin'
-    // Each row overhangs the area by the cutter's radius at both ends
-    const rad = cut.diameter / 2
-    if (area.xMin - rad < range.X.min || area.xMax + rad > range.X.max) return `The cutter would run past the X travel: raise the margin to at least ${Math.ceil(rad)} mm${flatness.last ? ' and probe again' : ''}`
+    if (!(W > 0 && H > 0)) return 'The cutter is too wide for the travel'
     return ''
   })
   let making = $state(false)
@@ -65,12 +65,19 @@
       const a = { xMin: 0, xMax: W, yMin: 0, yMax: H }
       const name = surfacingName({ ...a, depth: cut.depth })
       const file = new File([surfacingGcode({ ...a, ...cut })], name, { type: 'text/plain' })
+      if (machine.status.state !== 'Idle') return (failed = `Wait for Idle (now ${machine.status.state})`)
+      // First the origin, so the Job preview shows the file where it will cut
+      const r = await send(originLine)
+      if (!r.ok) return (failed = `${originLine} failed: ${r.error}`)
       const before = job.data
       job.error = ''
       await refresh('') // the root's listing, so a file of the same name is asked about before it is replaced
+      if (job.error) return (failed = job.error) // no upload against a listing that could not be read
       await upload(file, '') // which opens it in the Job panel once it is up
       if (job.name === name && job.data !== before) onopen?.()
       else failed = job.error // empty when a replace was declined
+    } catch (e) {
+      failed = e.message
     } finally {
       making = false
     }
@@ -95,7 +102,8 @@
     <p>{l.flatness}</p>
     <p><strong>{l.verdict}</strong></p>
     <p class="muted">Work X0 Y0 at the probed area's corner, Z0 on the table at the highest point: <span class="mono">{flatness.last.zeroLine}</span></p>
-    <button disabled={!!zeroBlocked()} title={zeroBlocked()} onclick={async () => (zeroed = await zeroAt(flatness.last.zeroLine))}>Zero at the highest point</button>
+    <button disabled={!!zeroBlocked(flatness.last)} title={zeroBlocked(flatness.last)} onclick={async () => (zeroed = await zeroAt(flatness.last.zeroLine))}>Zero at the highest point</button>
+    {#if stale(flatness.last)}<p class="err">{stale(flatness.last)}</p>{/if}
     {#if zeroed}<p>{zeroed}</p>{/if}
   {/if}
 </div>
@@ -106,10 +114,9 @@
     <label>{label} <input type="number" min="0" {step} bind:value={cut[key]} /> {unit}</label>
   {/each}
   {#if area}
-    <p>Area {W} × {H} mm{flatness.last ? ' (the probed area)' : ' (the travel less the margin)'}.
-      {#if flatness.last}Work X0 Y0 at the area's corner, Z0 at the highest point: use Zero at the highest point first.
-      {:else}Work X0 Y0 at the area's corner (machine X{r3(area.xMin)} Y{r3(area.yMin)}), Z0 at the highest point: probe the table first, or set the zero by hand.{/if}
-      The file stops before the first cut so the router can be switched on; Resume starts it.</p>
+    <p>Area {W} × {H} mm: the whole table the cutter can reach.</p>
+    <p>Create sets work X0 Y0 at the area's corner. Set Z0 first: Zero at the highest point after a flatness map, or Probe Z0 on the table's highest spot.</p>
+    <p class="muted">Create sends <span class="mono">{originLine}</span>, then uploads the file and opens it. The file stops before the first cut so the router can be switched on; Resume starts it.</p>
   {/if}
   <button class="go" disabled={!!blocked || making} onclick={create}>Create and open</button>
   {#if blocked}<p class="muted">{blocked}</p>{/if}

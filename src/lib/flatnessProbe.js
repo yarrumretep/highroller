@@ -23,6 +23,7 @@ export async function flatnessProbe(io) {
   if (!config?.range) throw new Error('The config has no axis travel (max_travel_mm / homing) to work from')
   const { X, Y, Z } = config.range
   const xMin = X.min + s.marginMm, xMax = X.max - s.marginMm, yMin = Y.min + s.marginMm, yMax = Y.max - s.marginMm
+  if (!(xMax > xMin && yMax > yMin)) throw new Error('The margin leaves no area to probe: lower it')
 
   let grid = { cols: 3, rows: 3 }, gridError = null
   for (;;) {
@@ -117,7 +118,8 @@ export async function flatnessProbe(io) {
   const report = flatnessReport(probed, { threshold: THRESHOLD_MM })
   // The touch is one plate thickness above the table: work Z0 goes on the table itself, as the Z0 probe does
   const zeroLine = `G10 L2 P1 X${num(xMin)} Y${num(yMin)} Z${num(report.highest.z - s.plateMm)}`
-  return { kind: 'flatness', report, area: { xMin, xMax, yMin, yMax }, grid: { cols, rows }, zeroLine }
+  // configText: a calibration applied since (steps/mm, pull-offs) moves the table under these numbers
+  return { kind: 'flatness', report, area: { xMin, xMax, yMin, yMax }, grid: { cols, rows }, zeroLine, configText: config.text }
 }
 
 const mm = v => Math.abs(v).toFixed(2)

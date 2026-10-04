@@ -5,6 +5,7 @@ import { flatnessReport } from './flatness.js'
 import { probeLines } from './probe.js'
 
 const range = { X: { min: 3, max: 1223 }, Y: { min: 3, max: 2443 }, Z: { min: -297, max: 3 } }
+const CONFIG = 'axes:\n  x:\n    steps_per_mm: 50.000\n'
 const LIFT = ['G91', 'G0 Z5', 'G90']
 
 // A scripted machine and user, as in calibration.test.js: probes answer in order (an Error is thrown), the grid
@@ -15,7 +16,7 @@ function scripted({ probes, answers = [{ cols: 2, rows: 2 }] }) {
   const settings = { plateMm: 0.5, marginMm: 50 }
   const io = {
     settings,
-    readConfig: async () => { rec.order.push('readConfig'); return { name: 'config.yaml', text: '', range } },
+    readConfig: async () => { rec.order.push('readConfig'); return { name: 'config.yaml', text: CONFIG, range } },
     send: async line => { rec.sent.push(line); return { ok: true, error: null, lines: [] } },
     probe: async () => {
       const z = probes.shift()
@@ -50,6 +51,8 @@ test('a 2 × 2 grid: home, then four points in serpentine order, each probed and
   assert.deepEqual(summary.area, { xMin: 53, xMax: 1173, yMin: 53, yMax: 2393 })
   // Work X0 Y0 at the area's corner; Z0 on the table at the highest point, one plate thickness below the touch
   assert.equal(summary.zeroLine, 'G10 L2 P1 X53 Y53 Z-40.4')
+  // The config it ran with: a later calibration that changes it makes the map stale
+  assert.equal(summary.configText, CONFIG)
 })
 
 test('a 3 × 3 grid snakes row by row: X ascending, then descending, then ascending', async () => {
@@ -139,6 +142,13 @@ test('a refused command aborts with its message, and a config without travel sto
   bare.io.readConfig = async () => ({ name: 'config.yaml', text: '', range: null })
   await assert.rejects(flatnessProbe(bare.io), /no axis travel/)
   assert.deepEqual(bare.rec.sent, [])
+
+  // A margin of half the Y travel or more leaves nothing to probe: said before the grid is asked
+  const wide = scripted({ probes: [] })
+  wide.settings.marginMm = 1220
+  await assert.rejects(flatnessProbe(wide.io), /^Error: The margin leaves no area to probe: lower it$/)
+  assert.equal(wide.rec.asks.length, 0)
+  assert.deepEqual(wide.rec.sent, [])
 })
 
 test('resultLines: the tilt per side, the peak to valley before and after the tilt, and the verdict', () => {

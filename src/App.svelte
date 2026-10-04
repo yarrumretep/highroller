@@ -36,7 +36,7 @@
 
 <TopBar />
 <ConfirmDialog />
-{#if calibrating}<Wizard script={calibrate} title="Calibrate" onclose={() => (calibrating = false)} />{/if}
+{#if calibrating}<Wizard script={calibrate} title="Calibrate" onclose={s => { if (s?.applied) flatness.last = null; calibrating = false }} />{/if}
 {#if flattening}<Wizard script={flatnessProbe} title="Flatness map" onclose={s => { if (s?.kind === 'flatness') flatness.last = { ...s, at: Date.now() }; flattening = false }} />{/if}
 
 <main>
