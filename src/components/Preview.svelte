@@ -243,7 +243,10 @@
   }
   function onwheel(e) {
     e.preventDefault()
-    zoomAt(local(e), Math.exp(-e.deltaY * 0.0015))
+    // A trackpad pinch arrives as a ctrl+wheel with tiny deltas (a few units per event), so it needs a far
+    // bigger step than a mouse wheel notch (about 100 units); line-mode deltas count as 16 px each.
+    const delta = e.deltaY * (e.deltaMode === 1 ? 16 : 1)
+    zoomAt(local(e), Math.exp(-delta * (e.ctrlKey ? 0.012 : 0.0015)))
   }
 
   onMount(() => {
