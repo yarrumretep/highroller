@@ -15,7 +15,7 @@ export function surfacingGcode({ xMin, xMax, yMin, yMax, diameter = 25.4, stepov
   for (let j = 1; j * depthPerPass < depth - 1e-9; j++) passes.push(-(j * depthPerPass))
   passes.push(-depth)
 
-  const lines = ['G21 G90 G94', `G0 Z${num(safeZ)}`, `G0 X${num(x0)} Y${num(yMin)}`, 'M0']
+  const lines = ['G21 G90 G94 G54', `G0 Z${num(safeZ)}`, `G0 X${num(x0)} Y${num(yMin)}`, 'M0'] // G54: the zero the flatness map sets
   let rightward = true // the tool starts at x0, so the first sweep goes toward x1
   for (let p = 0; p < passes.length; p++) {
     const z = passes[p]

@@ -273,6 +273,14 @@ export function start(port = 8081) {
       status()
       return ok()
     }
+    if (/^G10\s*L2\s*P[01]/.test(l)) { // the work origin given directly in machine coordinates
+      for (const [w, v] of words(l.replace(/^G10\s*L2\s*P[01]/, ''))) {
+        if (AXES.includes(w)) m.wco[AXES.indexOf(w)] = v
+      }
+      wcoIn = 0
+      status()
+      return ok()
+    }
     if (/^(G53\s*)?(G9[01]\s*)?G[01]\b/.test(l)) return motion(l, false, ok)
     ok()
   }
