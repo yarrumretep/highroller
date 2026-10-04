@@ -161,6 +161,16 @@ test('one side length is enough for steps per mm', async () => {
   assert.equal(Number(y.edits[0].new), Number((Number(y.edits[0].old) * Number(x.edits[0].new) / Number(x.edits[0].old)).toFixed(3)))
 })
 
+test('with soft limits, a homed position that is not a whole number of steps gets a warning note', async () => {
+  const text = CONFIG.replace('  x:\n    steps_per_mm: 50.000', '  x:\n    soft_limits: true\n    steps_per_mm: 50.000')
+  const { io, rec } = scripted({ probes: [-40, -40, -40, -40], answers: [{ ac: d(1120, 2340), bd: d(1120, 2340), ab: 1119, dc: null, ad: null, bc: null }], text })
+  await calibrate(io)
+  const x = rec.review.changes.find(c => c.label === 'X steps per mm')
+  assert.ok(x, 'X steps per mm changed (1119 measured for 1120)')
+  assert.ok(rec.review.notes.some(n => /^X has soft limits and homes to mpos_mm 3/.test(n)), rec.review.notes.join('|'))
+  assert.ok(!rec.review.notes.some(n => /^Y has soft limits/.test(n)), 'Y has no soft limits in this config')
+})
+
 test('a refused command aborts with its message', async () => {
   const { io } = scripted({ probes: [], answers: [] })
   io.send = async line => ({ ok: line !== '$H', error: 'reset', lines: [] })

@@ -192,12 +192,23 @@ export async function calibrate(io) {
   pulloffs('z', (homesPositive(config.text, 'z') ? 1 : -1) * tiltMm, zMotor0AtXmax, 'tilt', tiltMm)
   pulloffs('y', (homesPositive(config.text, 'y') ? -1 : 1) * skewMm, yMotor0AtXmax, 'squareness', skewMm)
 
+  // Homing sets the position in whole steps and the soft-limit travel starts exactly at mpos_mm, so a homed
+  // position that is not a whole number of steps lands a fraction of a step outside the travel and trips ALARM:2.
+  const softLimitNote = (axis, now) => {
+    if (getValue(config.text, `axes/${axis}/soft_limits`) !== 'true') return
+    const mpos = Number(getValue(config.text, `axes/${axis}/homing/mpos_mm`) ?? 0)
+    const steps = mpos * now
+    if (mpos && Math.abs(steps - Math.round(steps)) > 1e-6) notes.push(`${axis.toUpperCase()} has soft limits and homes to mpos_mm ${num(mpos)}, which is ${fmt(steps)} steps at the new steps per mm: the homed position would land just outside the travel and the first move would trip ALARM:2. Set axes/${axis}/homing/mpos_mm to 0 (and add ${num(mpos)} to max_travel_mm) before applying.`)
+  }
   const scale = (axis, commanded, a, b) => {
     const given = [a, b].filter(v => v > 0) // one side is enough; two are averaged
     if (!given.length) return null
     const cur = Number(getValue(config.text, `axes/${axis}/steps_per_mm`))
     const now = stepsPerMm(cur, commanded, given.reduce((s, v) => s + v, 0) / given.length)
-    if (fmt(cur) !== fmt(now)) changes.push({ label: `${axis.toUpperCase()} steps per mm`, edits: [{ path: `axes/${axis}/steps_per_mm`, old: fmt(cur), new: fmt(now) }] })
+    if (fmt(cur) !== fmt(now)) {
+      changes.push({ label: `${axis.toUpperCase()} steps per mm`, edits: [{ path: `axes/${axis}/steps_per_mm`, old: fmt(cur), new: fmt(now) }] })
+      softLimitNote(axis, Number(fmt(now)))
+    }
     return now / cur
   }
   const xRatio = scale('x', W, m.ab, m.dc)
@@ -206,7 +217,10 @@ export async function calibrate(io) {
   const sameScale = (axis, from, ratio) => {
     const cur = Number(getValue(config.text, `axes/${axis}/steps_per_mm`))
     const now = cur * ratio
-    if (fmt(cur) !== fmt(now)) changes.push({ label: `${axis.toUpperCase()} steps per mm (same scale as ${from}, unmeasured)`, unticked: true, edits: [{ path: `axes/${axis}/steps_per_mm`, old: fmt(cur), new: fmt(now) }] })
+    if (fmt(cur) !== fmt(now)) {
+      changes.push({ label: `${axis.toUpperCase()} steps per mm (same scale as ${from}, unmeasured)`, unticked: true, edits: [{ path: `axes/${axis}/steps_per_mm`, old: fmt(cur), new: fmt(now) }] })
+      softLimitNote(axis, Number(fmt(now)))
+    }
   }
   if (xRatio != null && yRatio == null) sameScale('y', 'X', xRatio)
   if (yRatio != null && xRatio == null) sameScale('x', 'Y', yRatio)
