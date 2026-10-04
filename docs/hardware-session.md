@@ -55,11 +55,14 @@ With `soft_limits: true`, an axis's travel starts exactly at its `homing/mpos_mm
 An over-jog runs into a switch and chatters against it (the stepper skipping), bending the switch arm and with it the home position. Two settings stop that; both are set live with `$/…` and kept with `$CD=config.yaml` (FluidNC 3.9.9, checked in its source):
 
 - `soft_limits: true` on an axis clamps every jog to the travel: a hold-to-run jog stops at the travel's edge with no alarm and no contact (`Cartesian::constrain_jog`), and a G0/G1 past it is refused with ALARM:2 before it starts. It needs a homed machine and a right `max_travel_mm`, and the `mpos_mm` note above applies to every axis whose steps-per-mm is no longer a round number.
-- `hard_limits: true` on an axis makes any switch closure outside homing an immediate stop: ALARM:1, steppers off, position forgotten. Recover with STOP (a reset), Unlock, a jog away from the switch (FluidNC allows a nudge of up to the pull-off off an active switch), then Home. The catch: noise on a switch wire trips a false ALARM:1 mid-job, so try it on jogs for a while before trusting it under a cut.
+- `hard_limits: true` on a motor (it sits under `motor0`/`motor1`, beside the switch pin, not on the axis) makes any closure of that switch outside homing an immediate stop: ALARM:1, steppers off, position forgotten. Recover with STOP (a reset), Unlock, a jog away from the switch (FluidNC allows a nudge of up to the pull-off off an active switch), then Home. The catch: noise on a switch wire trips a false ALARM:1 mid-job, so try it on jogs for a while before trusting it under a cut.
 
 ```
 $/axes/z/soft_limits=true
-$/axes/z/hard_limits=true
+$/axes/z/motor0/hard_limits=true
+$/axes/z/motor1/hard_limits=true
 $CD=config.yaml
 $H
 ```
+
+(Y also has two motors; X has one. `$/axes/z/motor0/hard_limits` alone, without `=`, shows the current value.)
