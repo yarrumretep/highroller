@@ -42,13 +42,12 @@
     selected = null
     await remove(job.dir, e.name, e.dir)
   }
-  function pick(ev) {
-    const file = ev.currentTarget.files[0]
+  async function pick(ev) {
+    const files = [...ev.currentTarget.files]
     ev.currentTarget.value = ''
-    if (file) {
-      selected = null // the just-uploaded file isn't the stale selection from before
-      upload(file, job.dir)
-    }
+    if (!files.length) return
+    selected = null // the just-uploaded files aren't the stale selection from before
+    for (const file of files) await upload(file, job.dir) // one at a time: the card takes one upload, and each may ask before replacing
   }
   async function create() {
     const name = newFolder.trim()
@@ -85,7 +84,7 @@
   </section>
   <footer>
     <button disabled={busy} onclick={() => picker.click()}>Upload here</button>
-    <input type="file" accept=".nc,.gcode,.ngc,.tap,.cnc,.txt" hidden bind:this={picker} onchange={pick} />
+    <input type="file" multiple accept=".nc,.gcode,.ngc,.tap,.cnc,.txt" hidden bind:this={picker} onchange={pick} />
     <button disabled={busy} onclick={() => (newFolder = newFolder === null ? '' : null)}>New folder</button>
     {#if selected && !selected.dir}<a class="button" href={sdUrl(pathOf(selected))} download={selected.name}>Download</a>{/if}
     <button disabled={busy || !selected} onclick={del}>Delete</button>
