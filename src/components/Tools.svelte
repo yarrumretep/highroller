@@ -5,6 +5,7 @@
   import { flatness, stale, zeroBlocked, zeroAt } from '../lib/flatness.svelte.js'
   import { resultLines } from '../lib/flatnessProbe.js'
   import { surfacingGcode, surfacingName } from '../lib/surfacing.js'
+  import { unhomedNote } from '../lib/homing.js'
 
   // onopen: the surfacing file is open in the Job panel, so show it
   let { onstart, onflatten, onopen } = $props()
@@ -49,7 +50,6 @@
     if (machine.conn !== 'open') return 'Not connected'
     if (!noJob()) return 'Wait until the job has finished'
     if (machine.status.state !== 'Idle') return `Wait for Idle (now ${machine.status.state})`
-    if (!(machine.homed.X && machine.homed.Y)) return 'Home X and Y first: the corner is in machine coordinates'
     if (flatness.last && stale(flatness.last)) return stale(flatness.last)
     if (!FIELDS.every(([k]) => cut[k] > 0) || cut.stepoverPct > 100) return 'Every field needs a number above 0 (stepover up to 100 %)'
     if (!(W > 0 && H > 0)) return 'The cutter is too wide for the travel'
@@ -121,7 +121,7 @@
     <p class="muted">Create sends <span class="mono">{originLine}</span>, then uploads the file and opens it. The file stops before the first cut so the router can be switched on; Resume starts it.</p>
   {/if}
   <button class="go" disabled={!!blocked || making} onclick={create}>Create and open</button>
-  {#if blocked}<p class="muted">{blocked}</p>{/if}
+  {#if blocked}<p class="muted">{blocked}</p>{:else if unhomedNote(machine.homed, 'XY')}<p class="muted">{unhomedNote(machine.homed, 'XY')} The corner is in machine coordinates.</p>{/if}
   {#if making}<p class="muted">Uploading to the SD card…</p>{/if}
   {#if failed}<p class="err">{failed}</p>{/if}
 </div>

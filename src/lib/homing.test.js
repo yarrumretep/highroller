@@ -1,8 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { homedAfter, homesPositive } from './homing.js'
+import { homedAfter, homesPositive, unhomedNote } from './homing.js'
 
 const after = lines => lines.reduce(homedAfter, {})
+
+test('unhomedNote names the axes not seen homed, and is empty once they all have been', () => {
+  assert.match(unhomedNote({}, 'XY'), /^X Y not seen homed/)
+  assert.match(unhomedNote(after(['[MSG:Homed:Z]', '[MSG:Homed:X]']), 'XYZ'), /^Y not seen homed/)
+  assert.equal(unhomedNote(after(['[MSG:Homed:Z]', '[MSG:Homed:XY]']), 'XYZ'), '')
+})
 
 test('each homing cycle marks only its own axes: Home Z alone does not unlock X and Y', () => {
   assert.deepEqual(after(['[MSG:Homed:Z]']), { Z: true })

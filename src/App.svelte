@@ -14,6 +14,7 @@
   import { calibrate } from './lib/calibration.js'
   import { flatnessProbe } from './lib/flatnessProbe.js'
   import { flatness } from './lib/flatness.svelte.js'
+  import { unhomedNote } from './lib/homing.js'
 
   const TABS = [['jog', 'Jog'], ['job', 'Job'], ['tools', 'Tools'], ['more', 'More']]
   let tab = $state('jog')
@@ -55,8 +56,8 @@
       goBlocked={machine.conn !== 'open' ? 'Not connected'
         : job.running ? 'A job is running'
         : machine.status.state !== 'Idle' ? `Wait for Idle (now ${machine.status.state})`
-        : !(machine.homed.X && machine.homed.Y) ? 'Home X and Y first: a tap moves in machine coordinates'
         : ''}
+      goNote={unhomedNote(machine.homed, 'XY')}
       onGo={goTo}
     />
     <Job />

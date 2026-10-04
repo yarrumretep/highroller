@@ -3,8 +3,9 @@
 
   // Drawn in machine coordinates: the file's work coordinates shifted by the work offset `wco`, the tool at
   // `mpos`. `wpos` supplies the work Z for the red/green rule; `range` is the X/Y travel, if known.
-  // goBlocked: why a tap cannot move the machine right now ('' when it can) — shown when the user taps anyway
-  let { job = null, current = -1, mpos = [0, 0, 0], wpos = [0, 0, 0], wco = [0, 0, 0], range = null, goBlocked = 'Not connected', onGo = null } = $props()
+  // goBlocked: why a tap cannot move the machine right now ('' when it can) — shown when the user taps anyway.
+  // goNote: a caution shown over the Go button (homing not seen on this connection); the move still goes.
+  let { job = null, current = -1, mpos = [0, 0, 0], wpos = [0, 0, 0], wco = [0, 0, 0], range = null, goBlocked = 'Not connected', goNote = '', onGo = null } = $props()
   const canGo = $derived(!goBlocked)
 
   let box, base, trail, dot
@@ -279,6 +280,7 @@
   <canvas bind:this={trail}></canvas>
   <canvas bind:this={dot}></canvas>
   {#if target && canGo}
+    {#if goNote}<p class="gonote">{goNote}</p>{/if}
     <button class="goto" onpointerdown={e => e.stopPropagation()} onpointerup={e => e.stopPropagation()} onclick={goToTarget}>Go to X {target.x.toFixed(1)} Y {target.y.toFixed(1)}</button>
   {/if}
   <!-- goerr and hint share one spot: a refusal takes priority over the "load a file" hint -->
@@ -290,6 +292,7 @@
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   .hint { position: absolute; inset: auto 0 12px; margin: 0; text-align: center; font-size: 14px; color: var(--muted); pointer-events: none; }
   .goerr { position: absolute; inset: auto 0 12px; margin: 0; text-align: center; font-size: 14px; font-weight: 600; color: var(--bad); pointer-events: none; }
+  .gonote { position: absolute; inset: auto 12px 68px; margin: 0; text-align: center; font-size: 13px; color: var(--muted); pointer-events: none; }
   .goto { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); min-height: 48px; padding: 0 18px; font-weight: 700; color: white; background: var(--accent); border-color: var(--accent); }
   @media (min-width: 1000px) { .preview { height: 60vh; } }
 </style>

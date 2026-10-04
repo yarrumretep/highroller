@@ -2,6 +2,7 @@
   import { machine, send, fnc } from '../lib/machine.svelte.js'
   import { settings } from '../lib/settings.svelte.js'
   import { probeZ } from '../lib/probe.js'
+  import { unhomedNote } from '../lib/homing.js'
 
   const AXES = ['X', 'Y', 'Z']
   const idle = $derived(machine.conn === 'open' && machine.status.state === 'Idle')
@@ -49,10 +50,7 @@
     if (z != null && z < 10) await cmd('G0 Z10') // clear the stock (work Z0 is its top) without climbing to the top of travel
     await cmd('G0 X0 Y0')
   })
-  const raise = () => run('Raising…', async () => {
-    if (!machine.homed.Z) throw new Error('Home Z first.') // G53 needs a known machine position
-    await cmd(`G53 G0 Z${top}`)
-  })
+  const raise = () => run('Raising…', () => cmd(`G53 G0 Z${top}`))
 
   // Double-click a number to type a destination for that axis: Enter or Go moves there, Escape cancels.
   let edit = $state(null) // { i, machineCoords, value }
@@ -74,7 +72,6 @@
     const m = machineCoords ? v : v + wco[i] // the machine editor's value is already a machine coordinate
     const range = machine.config?.range?.[AXES[i]]
     if (range && (m < range.min || m > range.max)) { error = `${AXES[i]} travel is ${range.min.toFixed(3)} to ${range.max.toFixed(3)}.`; return }
-    if (!machine.homed[AXES[i]]) { error = `Home ${AXES[i]} first.`; return } // G53 needs that axis's machine position
     edit = null
     run('Moving…', () => cmd(`G53 G0 ${AXES[i]}${Math.round(m * 1000) / 1000}`))
   }
@@ -115,7 +112,7 @@
     <!-- Enabled before the plate has touched: pressing it then shows the hint (a disabled button cannot be tapped for help) -->
     <button class:go={armed} disabled={!idle || !!busy} onclick={() => (armed ? probe() : (hint = true))} title={HINT}>Probe Z0</button>
     <button disabled={!idle || !!busy || top == null || !machine.status.wpos} onclick={goXY0}>Go to XY0</button>
-    <button disabled={!idle || !!busy || top == null || !machine.homed.Z} onclick={raise}>Raise Z</button>
+    <button disabled={!idle || !!busy || top == null} onclick={raise}>Raise Z</button>
   </div>
   <div class="homes">
     <button disabled={!canHome || !!busy} onclick={() => home('')}>Home all</button>
@@ -123,8 +120,9 @@
     <button disabled={!canHome || !!busy} onclick={() => home('Y')}>Home Y</button>
     <button disabled={!canHome || !!busy} onclick={() => home('Z')}>Home Z</button>
   </div>
-  <!-- One line that is always there, so a note coming or going never shifts the jog pad -->
-  <p class="note" class:err={!busy && !!error}>{busy || error || (hint && !armed ? HINT : '')}</p>
+  <!-- One line that is always there, so a note coming or going never shifts the jog pad. Lowest priority:
+       which axes' homing this page has not seen (it cannot ask the board), a caution for Raise Z and typed moves -->
+  <p class="note" class:err={!busy && !!error}>{busy || error || (hint && !armed ? HINT : '') || unhomedNote(machine.homed, 'XYZ')}</p>
 </div>
 
 <style>

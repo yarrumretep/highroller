@@ -17,6 +17,14 @@ export function homedAfter(homed, line) {
   return homed
 }
 
+// Why a machine-coordinate move may land wrong, or '': axes whose homing this connection has not seen. The board
+// cannot be asked (3.9.9 reports no homed flag), and it keeps its position across the page's reconnects and
+// reloads, so this is a note beside the move, not a refusal.
+export function unhomedNote(homed, axes) {
+  const miss = [...axes].filter(a => !homed[a])
+  return miss.length ? `${miss.join(' ')} not seen homed since this page connected: the board's position is trusted as is.` : ''
+}
+
 // axes/<axis>/homing/positive_direction: absent means true; otherwise FluidNC compares with "true", ignoring case.
 export function homesPositive(text, axis) {
   const v = getValue(text, `axes/${axis}/homing/positive_direction`)
