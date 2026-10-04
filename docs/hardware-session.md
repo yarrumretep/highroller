@@ -32,7 +32,7 @@ Router unplugged (spindle off) for everything up to the air-cut; a hand near the
 
 15. **Pass 1.** Tools → Start calibration. Read each "These lines run next" block before Continue; they must match what the console then shows.
     - Corner A: jog **Z only** (the pad offers only Z) to a few mm above where the plate will sit.
-    - Each corner: tape, plate, clip, tap to arm, Probe, lift the plate, Continue for the dot. The rapid between corners is at the travel height (first touch + 10 mm): watch that it clears the tape and plate.
+    - Each corner: tape, plate, clip, tap to arm, Probe, the bit lifts, slide the plate out, Continue for the dot (through the tape and the "dot depth" below it, 0.3 mm by default on the Tools tab: that is what makes the V-bit mark visible). The rapid between corners is at the travel height (first touch + 10 mm): watch that it clears the tape and plate.
     - Measure the dot centres. A measurement more than 1 % or 10 mm off the commanded length is re-asked.
     - Review: expect tilt and skew of a few mm at most, pull-offs within about ±3 mm of 4.000, steps/mm change under 1 %. Untick anything doubtful.
     - Apply: the board writes `config.yaml.bak` first, then the config, restarts, reconnects and homes. Pass: "Applied"; homing sounds normal (no racking); the stock WebUI shows both files, and `config.yaml` differs from your backup only in the ticked values.

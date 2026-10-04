@@ -102,7 +102,8 @@ export async function calibrate(io) {
     await g(`G0 Z${LIFT_MM}`)
     await g('G90')
     const z = c.probed.z
-    const plungeLine = `G53 G1 Z${num(z - s.plateMm - s.tapeMm)} F${DOT_FEED}`
+    const dotMm = s.dotMm ?? 0.3 // settings saved before this field existed
+    const plungeLine = `G53 G1 Z${num(z - s.plateMm - s.tapeMm - dotMm)} F${DOT_FEED}`
     if (c.name === 'A') travelZ = Math.min(z + TRAVEL_ABOVE_MM, Z.max)
     const upLine = `G53 G0 Z${num(travelZ)}`
     // What Continue actually goes on to run: this corner's dot, then the rapid to the next corner
@@ -110,7 +111,7 @@ export async function calibrate(io) {
     const nextLines = i < corners.length - 1 ? [upLine, xyLines[i + 1]] : [finalZLine]
     await io.step({
       title: `Corner ${c.name}: make the dot`,
-      text: 'Lift the plate off the tape. Keep the clip on. Press Continue to push the bit into the tape.',
+      text: `Lift the plate off the tape. Keep the clip on. Press Continue to make the dot: through the tape and ${num(dotMm)} mm into the surface.`,
       plateOff: true, // the plate must not still be touching the bit
       lines: ['M5', plungeLine, upLine, 'G4 P0', ...nextLines],
     })

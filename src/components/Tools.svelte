@@ -23,6 +23,7 @@
   <h2>Settings</h2>
   <label>Touch plate thickness <input type="number" min="0" step="0.01" value={settings.plateMm} onchange={e => num('plateMm', e)} /> mm</label>
   <label>Tape thickness <input type="number" min="0" step="0.01" value={settings.tapeMm} onchange={e => num('tapeMm', e)} /> mm</label>
+  <label>Dot depth below the tape <input type="number" min="0" step="0.1" value={settings.dotMm ?? 0.3} onchange={e => num('dotMm', e)} /> mm</label>
   <label>Gantry span (0 = use the X travel) <input type="number" min="0" step="1" value={settings.spanMm} onchange={e => num('spanMm', e)} /> mm</label>
   <label>Corner margin inside the travel <input type="number" min="0" step="1" value={settings.marginMm} onchange={e => num('marginMm', e)} /> mm</label>
   <p class="muted">If a pass makes things worse, the next pass swaps the motor side for you.</p>

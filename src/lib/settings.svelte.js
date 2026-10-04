@@ -13,6 +13,7 @@ const DEFAULTS = {
   feedZ: 600,
   plateMm: 0.5, // touch plate thickness; V1 Engineering's plate is 0.5 mm
   tapeMm: 0.1, // masking tape thickness, for the calibration dots
+  dotMm: 0.3, // how far below the tape the calibration dot goes: a V-bit's mark is only as wide as it is deep
   spanMm: 0, // distance between the two Y (and Z) motors; 0 = not set yet
   marginMm: 50, // how far inside the travel the calibration corners sit
   yMotor0AtXmax: false, // which side each twin motor is on

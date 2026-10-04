@@ -40,7 +40,7 @@ const range = { X: { min: 3, max: 1223 }, Y: { min: 3, max: 2443 }, Z: { min: -2
 // everything is recorded. The probe touches where the last corner move went, plus that corner's offset in `at`.
 function scripted({ probes, answers, keep = c => true, at = [], text = CONFIG }) {
   const rec = { sent: [], steps: [], asks: [], review: null, applied: null, base: null, busy: [], order: [] }
-  const settings = { plateMm: 10, tapeMm: 0.1, spanMm: 1200, marginMm: 50, yMotor0AtXmax: false, zMotor0AtXmax: false }
+  const settings = { plateMm: 10, tapeMm: 0.1, dotMm: 0.3, spanMm: 1200, marginMm: 50, yMotor0AtXmax: false, zMotor0AtXmax: false }
   const io = {
     settings,
     readConfig: async () => { rec.order.push('readConfig'); return { name: 'config.yaml', text, range } },
@@ -80,7 +80,7 @@ test('one pass: probes, dots, measurements, and a single config write with every
   assert.equal(rec.sent[0], '$H')
   const a = rec.sent.indexOf('G53 G0 X53 Y53')
   // after the probe: lift clear of the plate, then (after Continue) the dot and the retract
-  assert.deepEqual(rec.sent.slice(a + 1, a + 9), ['G4 P0', 'G91', 'G0 Z5', 'G90', 'M5', 'G53 G1 Z-50.1 F100', 'G53 G0 Z-30', 'G4 P0'])
+  assert.deepEqual(rec.sent.slice(a + 1, a + 9), ['G4 P0', 'G91', 'G0 Z5', 'G90', 'M5', 'G53 G1 Z-50.4 F100', 'G53 G0 Z-30', 'G4 P0']) // touch − plate − tape − dot
   assert.ok(rec.sent.includes('G53 G1 Z-49.6 F100')) // corner B's dot, 0.5 mm higher
 
   // The numbers
