@@ -39,3 +39,8 @@ Router unplugged (spindle off) for everything up to the air-cut; a hand near the
 16. **Pass 2** with fresh tape on the same spots. Pass: the remaining error is smaller; `config.yaml.bak` is unchanged. If the review says it swapped a motor side, note it: the machine's layout or sign differs from the assumption, and the next pass should improve.
 17. **Abort paths.** Cancel at a waiting step; STOP during a corner move. Pass: "Stopped" and nothing else moves.
 18. **Recovery drill.** Once, restore `config.yaml` from `config.yaml.bak` with the stock WebUI, so the way back is known.
+
+## Flatness map and surfacing (after calibration)
+
+19. **Flatness map.** Tools → Probe the table, 3 × 3 to start. At each point: tape is not needed, just the plate on the table under the bit, clip on, tap to arm, Probe; the bit lifts, pick the plate up, Continue. Pass: the result table shows heights of 0 or below with the highest cell marked, the tilt matches what the calibration left (near zero after a good pass), and the verdict says "Flat enough" or gives a depth. Press **Zero Z at the highest point**: the Z readout changes by the plate thickness plus the lift.
+20. **Surfacing pass.** Check the cutter diameter (25.4 for the 1" bit), leave stepover 40 % and depth per pass 0.5, and the depth from the map. **Create and open** sets work X0 Y0 at the cut's corner (the readout shows negative X and Y while the bit is at home), uploads the file and opens it. Pass: the preview fills the dashed outline. Run: the job holds at the first corner with the router off; switch the router on, press Resume, and watch the first row. STOP is hold then reset, as always. Expect about two hours for a full table at 2500 mm/min with a 1" bit.
