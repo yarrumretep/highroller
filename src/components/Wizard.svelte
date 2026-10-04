@@ -10,10 +10,13 @@
   import { settings, loadSettings } from '../lib/settings.svelte.js'
   import { probeZ } from '../lib/probe.js'
   import { readFlash, writeFlash, listFlash } from '../lib/flash.js'
-  import { calibrate, badEdit } from '../lib/calibration.js'
+  import { badEdit } from '../lib/calibration.js'
+  import { resultLines } from '../lib/flatnessProbe.js'
+  import { zeroBlocked, zeroAt } from '../lib/flatness.svelte.js'
   import JogPad from './JogPad.svelte'
 
-  let { onclose } = $props()
+  // `script(io)` is the routine (calibrate, flatnessProbe); `onclose(summary)` gets what it returned, if it finished.
+  let { script, title = 'Calibrate', onclose } = $props()
   let dialog
   // What the routine is showing right now: { kind: 'busy'|'step'|'ask'|'review'|'done'|'error', ... }
   let view = $state({ kind: 'busy', text: 'Starting…' })
@@ -23,6 +26,8 @@
   let reject = null // rejects it, so STOP/Cancel/unmount end the routine rather than letting it run on
   let primaryBtn = $state() // the step/ask/review's own action button, focused instead of STOP
   let selfClosed = false // true once we've asked the dialog to close itself (see the native onclose below)
+  let summary = null // what the routine returned
+  let zeroed = $state('') // the flatness map's zero: what the controller said
 
   // Probe arming for steps with `arm`: the probe input must close and open again.
   let seenClosed = false
@@ -173,8 +178,8 @@
     document.addEventListener('visibilitychange', relock)
     const guard = e => { if (view.kind !== 'done' && view.kind !== 'error') { e.preventDefault(); e.returnValue = '' } }
     addEventListener('beforeunload', guard)
-    calibrate(io)
-      .then(summary => (view = { kind: 'done', summary }))
+    script(io)
+      .then(s => { summary = s; view = { kind: 'done', summary: s } })
       .catch(e => (view = { kind: 'error', text: e.message }))
     return () => {
       abort() // an unmount (e.g. the dialog is torn down some other way) ends the routine too
@@ -206,7 +211,7 @@
     abort()
     selfClosed = true
     dialog?.close()
-    onclose()
+    onclose(summary)
   }
   async function stopAll() {
     abort() // ends the routine now; it does not wait for the reset below
@@ -229,7 +234,7 @@
   }}
 >
   <header>
-    <strong id="cal-title">{view.title ?? 'Calibrate'}</strong>
+    <strong id="cal-title">{view.title ?? title}</strong>
     <span class="state">{machine.status.state}</span>
     <button class="stop" onpointerdown={e => { e.preventDefault(); stopAll() }} onclick={e => e.detail === 0 && stopAll()}>STOP</button>
   </header>
@@ -255,7 +260,7 @@
       <p>{view.text}</p>
       {#if view.error}<p class="err">{view.error}</p>{/if}
       {#each view.fields as f}
-        <label>{f.label}{f.optional ? ' (optional)' : ''} <input type="number" step="0.01" inputmode="decimal" bind:value={answers[f.name]} /> {f.unit}</label>
+        <label>{f.label}{f.optional ? ' (optional)' : ''} <input type="number" step={f.step ?? 0.01} inputmode="decimal" bind:value={answers[f.name]} /> {f.unit}</label>
       {/each}
       <button class="go" bind:this={primaryBtn} disabled={!askReady} onclick={next}>Continue</button>
     {:else if view.kind === 'review'}
@@ -274,6 +279,28 @@
       {:else}
         <p>Nothing to change.</p>
       {/if}
+    {:else if view.kind === 'done' && view.summary?.kind === 'flatness'}
+      {@const r = view.summary.report}
+      {@const g = view.summary.grid}
+      {@const l = resultLines(r)}
+      <p class="muted">Seen from above (Y-max at the top, X-max on the right), in mm below the highest point, which is marked.</p>
+      <table class="map mono">
+        <tbody>
+          {#each Array.from({ length: g.rows }, (_, k) => g.rows - 1 - k) as j}
+            <tr>
+              {#each r.heights.slice(j * g.cols, (j + 1) * g.cols) as h}
+                <td class:top={h.rel === 0}>{(Math.abs(h.rel) < 0.005 ? 0 : h.rel).toFixed(2)}</td>
+              {/each}
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      <p>{l.tilt}</p>
+      <p>{l.flatness}</p>
+      <p><strong>{l.verdict}</strong></p>
+      <p class="muted">Work X0 Y0 at the probed area's corner, Z0 on the table at the highest point. This line runs: <span class="mono">{view.summary.zeroLine}</span></p>
+      <button class="go" disabled={!!zeroBlocked()} title={zeroBlocked()} onclick={async () => (zeroed = await zeroAt(view.summary.zeroLine))}>Zero at the highest point</button>
+      {#if zeroed}<p>{zeroed}</p>{/if}
     {:else if view.kind === 'done'}
       <p>{view.summary.applied ? 'Applied. Put fresh tape on the same spots and run again to check the result.' : 'Nothing was changed.'}</p>
       <p class="mono">Tilt {view.summary.tiltMm} mm · Skew {view.summary.skewMm} mm</p>
@@ -301,6 +328,9 @@
   .go { min-height: 56px; font-size: 18px; font-weight: 700; color: white; background: var(--ok); border-color: var(--ok); }
   label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15px; }
   .change { min-height: 44px; padding: 6px 0; }
+  .map { border-collapse: collapse; width: 100%; font-size: 15px; text-align: center; }
+  .map td { padding: 8px 4px; border: 1px solid var(--line); }
+  .map .top { font-weight: 800; color: white; background: var(--ok); }
   .lines { display: grid; gap: 4px; }
   .lines pre, pre.lines { margin: 0; padding: 8px 10px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
   input[type='number'] { width: 120px; min-height: 44px; padding: 0 8px; font-size: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }

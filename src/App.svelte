@@ -8,15 +8,19 @@
   import Overrides from './components/Overrides.svelte'
   import Console from './components/Console.svelte'
   import Tools from './components/Tools.svelte'
-  import Calibrate from './components/Calibrate.svelte'
+  import Wizard from './components/Wizard.svelte'
   import { machine, send } from './lib/machine.svelte.js'
   import { job } from './lib/job.svelte.js'
+  import { calibrate } from './lib/calibration.js'
+  import { flatnessProbe } from './lib/flatnessProbe.js'
+  import { flatness } from './lib/flatness.svelte.js'
 
   const TABS = [['jog', 'Jog'], ['job', 'Job'], ['tools', 'Tools'], ['more', 'More']]
   let tab = $state('jog')
   // Mounted at the top level, not inside the Tools tab section: a layout change to the phone breakpoint
   // mid-run must not hide the dialog behind a `display: none` tab while the page stays inert.
   let calibrating = $state(false)
+  let flattening = $state(false)
 
   // Tap-to-go is a machine-coordinate move: raise clear of the stock first, same rule as Dro's Go to XY0.
   async function goTo(x, y) {
@@ -32,7 +36,8 @@
 
 <TopBar />
 <ConfirmDialog />
-{#if calibrating}<Calibrate onclose={() => (calibrating = false)} />{/if}
+{#if calibrating}<Wizard script={calibrate} title="Calibrate" onclose={() => (calibrating = false)} />{/if}
+{#if flattening}<Wizard script={flatnessProbe} title="Flatness map" onclose={s => { if (s?.kind === 'flatness') flatness.last = { ...s, at: Date.now() }; flattening = false }} />{/if}
 
 <main>
   <section class:off={tab !== 'jog'}>
@@ -58,7 +63,7 @@
     <Overrides />
   </section>
   <section class:off={tab !== 'tools'}>
-    <Tools onstart={() => (calibrating = true)} />
+    <Tools onstart={() => (calibrating = true)} onflatten={() => (flattening = true)} onopen={() => (tab = 'job')} />
   </section>
   <section class:off={tab !== 'more'}>
     <Console />

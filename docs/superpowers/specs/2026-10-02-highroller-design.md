@@ -127,7 +127,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 
 **Job tab:** list of files on the SD card, upload, preview, Run / Pause / Resume / Stop, progress, elapsed and remaining time, and overrides.
 
-**Tools tab:** the Calibrate routine, the Outputs wizard, and the settings form.
+**Tools tab:** the Calibrate routine, the Flatness map, the Surfacing pass, the Outputs wizard, and the settings form.
 
 **More tab**
 - **Console:** send raw commands and see the output.
@@ -236,6 +236,25 @@ One pass measures Z tilt, squareness and X/Y steps per mm from four V-bit dots o
 **Which motor is on which side.** A setting per axis (Y and Z), not shown in the UI: it defaults to the LowRider layout (motor0 at X-min). If a pass leaves more than 1.2× the previous pass's error in the same direction, the app swaps that setting and says so in the review.
 
 **Caveat shown in the routine:** tilt is measured against the surface the tape sits on. If this machine already surfaced the spoilboard, that surface follows the old tilt and the reading comes out near zero; for a true reading put the tape on something the machine didn't cut, such as a straight bar laid across.
+
+### Flatness map
+
+A wizard in the same dialog, under the same rules, that maps the table with the touch plate. (Added 2026-10-04.)
+
+1. **Grid:** columns × rows, 2 to 5 each (default 3 × 3), spread evenly over the travel less the margin (the calibration corners' `margin`), corners included.
+2. **Setup:** fit the bit you will surface with (the zero below is for the bit that probed), router off, the touch plate and clip. The app reads the config fresh, homes and moves to the first point at the top of Z; the user jogs Z only to a few millimetres above where the plate will sit.
+3. **Each point,** row by row from Y-min with every other row reversed (a serpentine): plate under the bit, tap to arm, probe (the shared routine), lift 5 mm; then the user picks the plate up (Continue stays disabled while the probe input is closed) and the bit moves to the next point at the travel height (first touch + 10 mm, never above the top of Z). A redo lifts and probes the same point again; a miss ends the run. After the last point the bit goes to the top of Z.
+4. **Result:** the heights as a grid seen from above, relative to the highest point (marked). A least-squares plane z = a·x + b·y + c gives the tilt: mm of rise across the probed X and Y spans. Peak to valley, raw and with the plane removed. Up to 0.15 mm raw is "flat enough"; above that the verdict is to surface, cutting pv + 0.1 mm (rounded up to 0.05 mm) from the highest point.
+5. **Zero at the highest point,** sent only on the user's press: `G10 L2 P1 X<area X-min> Y<area Y-min> Z<highest touch − plate thickness>`. Machine coordinates become the G54 offset: work X0 Y0 at the probed area's corner, Z0 on the table at its highest point. The same button is on the Tools card after the dialog has closed, while the machine is Idle and homed since this connection. The last map is kept until the page reloads.
+
+### Surfacing pass
+
+A Tools card that writes a surfacing file, uploads it to the SD card's root and opens it in the Job panel; running it is still the user's Run.
+
+- **Inputs:** cutter diameter (25.4 mm), stepover (40 %), depth (the map's recommended depth, else 0.5 mm), depth per pass (0.5 mm), feed (2500 mm/min), plunge feed (300 mm/min), safe height (5 mm).
+- **Area:** the probed rectangle, else the travel less the margin. The file is in work coordinates: X0 Y0 at the area's corner, Z0 at its highest point (Zero at the highest point sets both).
+- **The file:** `G21 G90 G94`, up to the safe height, to the raster start, then `M0`: the router is switched on by hand and the job holds until Resume. Then passes of the depth per pass down to the depth (the last exactly at it), each a serpentine raster of rows across X that overhang the area by the cutter's radius at both ends, a stepover apart with the last row on the area's far edge, moving between rows at cutting depth. At the end, up to the safe height and back to the start. Named `surface-<W>x<H>-<depth>mm.gcode`.
+- **Refused** while a job runs, before the config is known, and when the overhang would run past the X travel.
 
 ### Outputs
 
