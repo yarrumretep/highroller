@@ -81,7 +81,7 @@ test('one pass: probes, dots, measurements, and a single config write with every
   const a = rec.sent.indexOf('G53 G0 X53 Y53')
   // after the probe: lift clear of the plate, then (after Continue) the dot and the retract
   assert.deepEqual(rec.sent.slice(a + 1, a + 9), ['G4 P0', 'G91', 'G0 Z5', 'G90', 'M5', 'G53 G1 Z-50.4 F100', 'G53 G0 Z-30', 'G4 P0']) // touch − plate − tape − dot
-  assert.ok(rec.sent.includes('G53 G1 Z-49.6 F100')) // corner B's dot, 0.5 mm higher
+  assert.ok(rec.sent.includes('G53 G1 Z-49.9 F100')) // corner B's dot, 0.5 mm higher
 
   // The numbers
   assert.ok(Math.abs(summary.tiltMm - 0.5357) < 0.001, `tilt ${summary.tiltMm}`)
