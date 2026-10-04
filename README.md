@@ -4,6 +4,10 @@ A phone-and-desktop web UI for a FluidNC-driven CNC router (built for a LowRider
 
 What it does: jog pad with hold-to-run, STOP (hold, then reset), console, SD card browser with folders, job runner with a toolpath preview in machine coordinates and a time-left estimate that learns the real speed, feed/rapid/spindle overrides, touch-plate Z zero, and one calibration routine (four V-bit dots on tape → one measuring session → Z tilt, squareness and steps/mm written to the config, with a `.bak` of the old one).
 
+![HighRoller on a desktop: readout and jog pad, the toolpath preview with a job loaded, the job panel and overrides, and the Tools column](docs/screenshot.png)
+
+*The desktop layout with a job loaded, on the fake controller. On a phone the same panels become four tabs.*
+
 ## Develop against the fake controller
 
 ```bash
