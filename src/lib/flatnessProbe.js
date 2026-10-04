@@ -22,25 +22,31 @@ export async function flatnessProbe(io) {
   const config = await io.readConfig()
   if (!config?.range) throw new Error('The config has no axis travel (max_travel_mm / homing) to work from')
   const { X, Y, Z } = config.range
-  const xMin = X.min + s.marginMm, xMax = X.max - s.marginMm, yMin = Y.min + s.marginMm, yMax = Y.max - s.marginMm
-  if (!(xMax > xMin && yMax > yMin)) throw new Error('The margin leaves no area to probe: lower it')
 
-  let grid = { cols: 3, rows: 3 }, gridError = null
+  // The grid and the margin (remembered in the settings for next time)
+  let grid = { cols: 3, rows: 3, marginMm: s.marginMm }, gridError = null
   for (;;) {
     grid = await io.ask({
-      title: 'Flatness map: the grid',
-      text: `The plate is probed at a grid of points over a ${num(xMax - xMin)} × ${num(yMax - yMin)} mm area (the travel less the margin). More points show more of the shape and take longer.`,
+      title: 'Flatness map',
+      text: 'The plate is probed at a grid of points over the travel, less the margin. More points show more of the shape and take longer.',
       fields: [
         { name: 'cols', label: 'Columns (along X)', unit: 'points', step: 1 },
         { name: 'rows', label: 'Rows (along Y)', unit: 'points', step: 1 },
+        { name: 'marginMm', label: 'Margin inside the travel', unit: 'mm', step: 1, allowZero: true },
       ],
       error: gridError,
       values: grid,
     })
-    if (okCount(grid.cols) && okCount(grid.rows)) break
-    gridError = 'Columns and rows: a whole number from 2 to 5 each.'
+    const m = grid.marginMm
+    gridError = !(okCount(grid.cols) && okCount(grid.rows)) ? 'Columns and rows: a whole number from 2 to 5 each.'
+      : !(m >= 0) ? 'Margin: 0 or more.'
+      : !(X.max - m > X.min + m && Y.max - m > Y.min + m) ? 'The margin leaves no area to probe: lower it.'
+      : null
+    if (!gridError) break
   }
   const { cols, rows } = grid
+  s.marginMm = grid.marginMm
+  const xMin = X.min + grid.marginMm, xMax = X.max - grid.marginMm, yMin = Y.min + grid.marginMm, yMax = Y.max - grid.marginMm
   const at = (i, n, lo, hi) => r3(lo + (i * (hi - lo)) / (n - 1))
   // Row by row from Y-min, alternate rows right to left, so each move is to a neighbour
   const points = []

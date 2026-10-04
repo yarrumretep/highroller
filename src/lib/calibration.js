@@ -4,10 +4,10 @@ import { probeLines } from './probe.js'
 import { homesPositive } from './homing.js'
 
 // One calibration pass, written as a script. The UI (or a test) supplies `io`: the config, machine commands,
-// the probe, and the manual steps. Four V-bit dots on tape give Z tilt (from the probes), squareness (the
-// diagonals) and X/Y steps per mm (the sides); every correction is applied with one config write and one restart.
-// levelOnly: just the tilt, from the touch plate at the two front corners: no tape, no dots, no measuring.
-const DOT_FEED = 100 // mm/min, pushing the V-bit into the tape
+// the probe, and the manual steps. The first page picks what to calibrate. Z tilt alone needs the touch plate
+// at the two front corners; squareness and X/Y steps per mm need four V-bit dots on tape, measured (their
+// probes give the tilt for free). Every correction is applied with one config write and one restart.
+const DOT_FEED = 100 // mm/min, pushing the V-bit into the surface
 const TRAVEL_ABOVE_MM = 10 // travel height above the first touch
 const WORSE = 1.2 // a pass that leaves more than this much of the previous error made it worse
 const LIFT_MM = 5 // after a probe that can be redone, before it is tried again
@@ -27,9 +27,7 @@ export function badEdit(old, text) {
   return i < 0 ? null : `line ${i + 1} is not a key: ${lines[i].trim()}`
 }
 
-export const levelGantry = io => calibrate(io, { levelOnly: true })
-
-export async function calibrate(io, { levelOnly = false } = {}) {
+export async function calibrate(io) {
   const { settings: s } = io
   const g = async line => {
     const r = await io.send(line)
@@ -40,12 +38,47 @@ export async function calibrate(io, { levelOnly = false } = {}) {
   const config = await io.readConfig() // fresh: another device may have changed it since this page read it
   if (!config?.range) throw new Error('The config has no axis travel (max_travel_mm / homing) to work from')
   const { X, Y, Z } = config.range
-  const span = s.spanMm > 0 ? s.spanMm : X.max - X.min // 0 = use the X travel as the lever arm
-  const xMin = X.min + s.marginMm, xMax = X.max - s.marginMm, yMin = Y.min + s.marginMm, yMax = Y.max - s.marginMm
+  // The lever arm that turns a measured slope into a pull-off change: the X travel. The motors sit a little
+  // further apart than that (the core's width), so one pass corrects most of the error and the check pass
+  // takes the rest.
+  const span = X.max - X.min
+
+  // What to calibrate, and the two numbers that go with it (remembered in the settings for next time).
+  let what = { tilt: true, square: true, steps: true, dotMm: s.dotMm, marginMm: s.marginMm }, whatError = null
+  for (;;) {
+    what = await io.ask({
+      title: 'Calibrate',
+      text: 'Z tilt needs the touch plate at two front corners. Squareness and steps per mm need four V-bit dots on tape, measured with calipers or a tape measure.',
+      checks: [
+        { name: 'tilt', label: 'Z tilt: level the gantry' },
+        { name: 'square', label: 'Squareness' },
+        { name: 'steps', label: 'Steps per mm (X and Y)' },
+      ],
+      fields: [
+        { name: 'dotMm', label: 'Dot depth below the probed surface', unit: 'mm', step: 0.05, enabledIf: v => !!(v.square || v.steps) },
+        { name: 'marginMm', label: 'Corner margin inside the travel', unit: 'mm', step: 1, allowZero: true },
+      ],
+      error: whatError,
+      values: what,
+    })
+    const dots = what.square || what.steps
+    const m = what.marginMm
+    whatError = !(what.tilt || dots) ? 'Tick at least one.'
+      : dots && !(what.dotMm > 0) ? 'Dot depth: a number above 0.'
+      : !(m >= 0) ? 'Corner margin: 0 or more.'
+      : !(X.max - m > X.min + m && Y.max - m > Y.min + m) ? 'The margin leaves no rectangle inside the travel: lower it.'
+      : null
+    if (!whatError) break
+  }
+  const dots = !!(what.square || what.steps) // dots are made (and measured) only for squareness or steps per mm
+  const dotMm = what.dotMm
+  s.marginMm = what.marginMm
+  if (dots) s.dotMm = dotMm
+  const xMin = X.min + what.marginMm, xMax = X.max - what.marginMm, yMin = Y.min + what.marginMm, yMax = Y.max - what.marginMm
   const corners = [
     { name: 'A', x: xMin, y: yMin },
     { name: 'B', x: xMax, y: yMin },
-    ...(levelOnly ? [] : [{ name: 'C', x: xMax, y: yMax }, { name: 'D', x: xMin, y: yMax }]),
+    ...(dots ? [{ name: 'C', x: xMax, y: yMax }, { name: 'D', x: xMin, y: yMax }] : []),
   ]
   const xyLines = corners.map(c => `G53 G0 X${c.x} Y${c.y}`) // computed once; the same strings are previewed and sent
 
@@ -53,16 +86,15 @@ export async function calibrate(io, { levelOnly = false } = {}) {
   let travelZ = Z.max
   const homeLine = '$H'
   const firstZLine = `G53 G0 Z${num(travelZ)}`
-  const finalZLine = `G53 G0 Z${num(Z.max)}` // the rapid up after corner D; same height as firstZLine
+  const finalZLine = `G53 G0 Z${num(Z.max)}` // the rapid up after the last corner; same height as firstZLine
 
-  const under = levelOnly ? 'plate' : 'tape'
+  const under = dots ? 'tape' : 'plate'
   await io.step({
     title: 'Before you start',
-    text: (levelOnly
-      ? `Make sure the router is off. You will need the touch plate and its clip. The plate is touched at the two front corners, ${xMax - xMin} mm apart, and carried from one to the other.`
-      : 'Fit a V-bit and make sure the router is off. You will need four pieces of masking tape, the touch plate and its clip, and calipers or a tape measure. Dots go at the four corners of a ' + `${xMax - xMin} × ${yMax - yMin} mm rectangle.`)
-      + ` This pass uses a gantry span of ${num(span)} mm${s.spanMm > 0 ? '' : ' (the X travel, since no span is set)'}.`
-      + ` Note: tilt is measured against the surface the ${under} sits on; if this machine already surfaced the spoilboard, that surface follows the old tilt, so for a true reading put the ${under} on something the machine did not cut, such as a straight bar laid across.`,
+    text: (dots
+      ? 'Fit a V-bit and make sure the router is off. You will need four pieces of masking tape, the touch plate and its clip, and calipers or a tape measure. Dots go at the four corners of a ' + `${xMax - xMin} × ${yMax - yMin} mm rectangle.`
+      : `Make sure the router is off. You will need the touch plate and its clip. The plate is touched at the two front corners, ${xMax - xMin} mm apart, and carried from one to the other.`)
+      + (what.tilt ? ` Note: tilt is measured against the surface the ${under} sits on; if this machine already surfaced the spoilboard, that surface follows the old tilt, so for a true reading put the ${under} on something the machine did not cut, such as a straight bar laid across.` : ''),
     lines: [homeLine, firstZLine, xyLines[0]],
   })
   io.busy('Homing…')
@@ -84,8 +116,8 @@ export async function calibrate(io, { levelOnly = false } = {}) {
     // there and may have lost steps, and STOP is STOP.
     for (let error = null; ;) {
       await io.step({
-        title: `Corner ${c.name}: ${levelOnly ? 'touch plate' : 'tape and plate'}`,
-        text: (levelOnly ? 'Put the touch plate under the bit' : 'Stick a piece of tape under the bit. Put the touch plate on the tape') + ' and attach the clip to the bit. Tap the plate against the bit so the app sees the contact, then press Probe.',
+        title: `Corner ${c.name}: ${dots ? 'tape and plate' : 'touch plate'}`,
+        text: (dots ? 'Stick a piece of tape under the bit. Put the touch plate on the tape' : 'Put the touch plate under the bit') + ' and attach the clip to the bit. Tap the plate against the bit so the app sees the contact, then press Probe.',
         arm: true,
         lines: probeLines(),
         error,
@@ -109,19 +141,19 @@ export async function calibrate(io, { levelOnly = false } = {}) {
     await g(`G0 Z${LIFT_MM}`)
     await g('G90')
     const z = c.probed.z
-    const dotMm = s.dotMm ?? 0.3 // settings saved before this field existed
-    // Level only makes no dot: the step is just where the plate is picked up before the bit moves on.
-    const dotLines = levelOnly ? [] : ['M5', `G53 G1 Z${num(z - s.plateMm - s.tapeMm - dotMm)} F${DOT_FEED}`]
+    // The dot goes dotMm below the surface the plate sat on (the touch is one plate above it). Without dots the
+    // step is just where the plate is picked up before the bit moves on.
+    const dotLines = dots ? ['M5', `G53 G1 Z${num(z - s.plateMm - dotMm)} F${DOT_FEED}`] : []
     if (c.name === 'A') travelZ = Math.min(z + TRAVEL_ABOVE_MM, Z.max)
     const upLine = `G53 G0 Z${num(travelZ)}`
     // What Continue actually goes on to run: this corner's dot, then the rapid to the next corner
     // (or, after the last one, just the final rapid up — there's no further corner to move to).
     const nextLines = i < corners.length - 1 ? [upLine, xyLines[i + 1]] : [finalZLine]
     await io.step({
-      title: levelOnly ? `Corner ${c.name}: pick up the plate` : `Corner ${c.name}: make the dot`,
-      text: levelOnly
-        ? 'Lift the plate clear of the bit. Keep the clip on. Press Continue to move on.'
-        : `Lift the plate off the tape. Keep the clip on. Press Continue to make the dot: through the tape and ${num(dotMm)} mm into the surface.`,
+      title: dots ? `Corner ${c.name}: make the dot` : `Corner ${c.name}: pick up the plate`,
+      text: dots
+        ? `Lift the plate off the tape. Keep the clip on. Press Continue to make the dot, ${num(dotMm)} mm below the surface the plate sat on.`
+        : 'Lift the plate clear of the bit. Keep the clip on. Press Continue to move on.',
       plateOff: true, // the plate must not still be touching the bit
       lines: [...dotLines, upLine, 'G4 P0', ...nextLines],
     })
@@ -134,41 +166,45 @@ export async function calibrate(io, { levelOnly = false } = {}) {
   // The maths uses where each dot actually is: the probe's own position.
   const [A, B, C, D] = corners.map(c => c.probed)
   const len = (p, q) => Math.hypot(q.x - p.x, q.y - p.y)
-  // Tilt: the X-max side lower by this much across the gantry span (average of the two rows; level only has the front one)
+  // Tilt: the X-max side lower by this much across the gantry (both rows averaged; with the plate alone, the front one)
   const rowTilt = (p, q) => tilt({ zMin: p.z, zMax: q.z, xMin: p.x, xMax: q.x })
-  const tiltMm = span * (levelOnly ? rowTilt(A, B) : (rowTilt(A, B) + rowTilt(D, C)) / 2)
+  const tiltMm = what.tilt ? span * (dots ? (rowTilt(A, B) + rowTilt(D, C)) / 2 : rowTilt(A, B)) : null
 
-  // The measurements (not level only): the diagonals give squareness, the sides steps per mm.
+  // The measurements: the diagonals give squareness, the sides steps per mm.
   let m = null, skewMm = null, W = 0, H = 0
-  if (!levelOnly) {
+  if (dots) {
     const expected = { ac: len(A, C), bd: len(B, D), ab: len(A, B), dc: len(D, C), ad: len(A, D), bc: len(B, C) }
     const fields = [
-      { name: 'ac', label: 'Diagonal A–C', unit: 'mm' },
-      { name: 'bd', label: 'Diagonal B–D', unit: 'mm' },
-      { name: 'ab', label: 'Side A–B (X, front)', unit: 'mm', optional: true },
-      { name: 'dc', label: 'Side D–C (X, back)', unit: 'mm', optional: true },
-      { name: 'ad', label: 'Side A–D (Y, left)', unit: 'mm', optional: true },
-      { name: 'bc', label: 'Side B–C (Y, right)', unit: 'mm', optional: true },
+      ...(what.square ? [
+        { name: 'ac', label: 'Diagonal A–C', unit: 'mm' },
+        { name: 'bd', label: 'Diagonal B–D', unit: 'mm' },
+      ] : []),
+      ...(what.steps ? [
+        { name: 'ab', label: 'Side A–B (X, front)', unit: 'mm', optional: true },
+        { name: 'dc', label: 'Side D–C (X, back)', unit: 'mm', optional: true },
+        { name: 'ad', label: 'Side A–D (Y, left)', unit: 'mm', optional: true },
+        { name: 'bc', label: 'Side B–C (Y, right)', unit: 'mm', optional: true },
+      ] : []),
     ]
     let error = null
     for (;;) {
       m = await io.ask({
         title: 'Measure the dots',
-        text: `Measure between the dot centres. The diagonals give squareness; the sides are optional and give steps per mm. The rectangle was commanded as ${xMax - xMin} × ${yMax - yMin} mm.`,
+        text: 'Measure between the dot centres.' + (what.steps ? ' One side per axis is enough for steps per mm; two are averaged.' : '') + ` The rectangle was commanded as ${xMax - xMin} × ${yMax - yMin} mm.`,
         fields,
         error,
         values: m, // what was typed stays filled in when it is asked again
       })
       // More than 1 % or 10 mm (whichever is smaller) away from where the dots were put is a misreading, not an error to correct.
       const bad = fields.find(f => m[f.name] != null && Math.abs(m[f.name] - expected[f.name]) > Math.min(0.01 * expected[f.name], 10))
-      if (!bad) break
-      error = `${bad.label}: ${m[bad.name]} mm is too far from the expected ${expected[bad.name].toFixed(1)} mm. Measure it again.`
+      if (bad) { error = `${bad.label}: ${m[bad.name]} mm is too far from the expected ${expected[bad.name].toFixed(1)} mm. Measure it again.`; continue }
+      break
     }
-    // Skew: the X-max side further along +Y by this much across the span. A skewed length² is dx² + dy² + 2θ·dx·dy,
-    // so what the diagonals measure beyond the probed spots' own difference is the skew.
     W = (expected.ab + expected.dc) / 2
     H = (expected.ad + expected.bc) / 2
-    skewMm = span * (skew({ ac: m.ac, bd: m.bd, w: W, h: H }) - skew({ ac: expected.ac, bd: expected.bd, w: W, h: H }))
+    // Skew: the X-max side further along +Y by this much across the span. A skewed length² is dx² + dy² + 2θ·dx·dy,
+    // so what the diagonals measure beyond the probed spots' own difference is the skew.
+    if (what.square) skewMm = span * (skew({ ac: m.ac, bd: m.bd, w: W, h: H }) - skew({ ac: expected.ac, bd: expected.bd, w: W, h: H }))
   }
 
   // The motor-side swap is only a proposal until the review is confirmed (it must not stick on Cancel).
@@ -182,7 +218,7 @@ export async function calibrate(io, { levelOnly = false } = {}) {
     yMotor0AtXmax = !yMotor0AtXmax
     notes.push('The last pass made squareness worse, so the Y motor sides will be swapped.')
   }
-  if (s.lastTiltMm != null && Math.abs(tiltMm) > WORSE * Math.abs(s.lastTiltMm) && Math.sign(tiltMm) === Math.sign(s.lastTiltMm)) {
+  if (tiltMm != null && s.lastTiltMm != null && Math.abs(tiltMm) > WORSE * Math.abs(s.lastTiltMm) && Math.sign(tiltMm) === Math.sign(s.lastTiltMm)) {
     zMotor0AtXmax = !zMotor0AtXmax
     notes.push('The last pass made the tilt worse, so the Z motor sides will be swapped.')
   }
@@ -197,15 +233,15 @@ export async function calibrate(io, { levelOnly = false } = {}) {
     if (!(p0 >= 0 && p1 >= 0)) return notes.push(`No twin-motor pull-off found for ${axis.toUpperCase()}; ${what} not corrected.`)
     const [n0, n1] = splitPulloff({ p0, p1, delta, motor0AtXmax })
     if (Math.max(Math.abs(n0 - p0), Math.abs(n1 - p1)) > MAX_PULLOFF_STEP) {
-      throw new Error(`This pass would change the ${axis.toUpperCase()} pull-offs by ${fmt(n0 - p0)} and ${fmt(n1 - p1)} mm (${what}: ${fmt(measured)} mm across the gantry), more than ${MAX_PULLOFF_STEP} mm per pass, so nothing was changed. Check the measurements and the gantry span. If they are right, the machine is further out than one pass corrects: square it by hand, or correct the pull-offs in steps of up to ${MAX_PULLOFF_STEP} mm, then run the pass again.`)
+      throw new Error(`This pass would change the ${axis.toUpperCase()} pull-offs by ${fmt(n0 - p0)} and ${fmt(n1 - p1)} mm (${what}: ${fmt(measured)} mm across the gantry), more than ${MAX_PULLOFF_STEP} mm per pass, so nothing was changed. Check the measurements. If they are right, the machine is further out than one pass corrects: square it by hand, or correct the pull-offs in steps of up to ${MAX_PULLOFF_STEP} mm, then run the pass again.`)
     }
     const edits = [['motor0', p0, n0], ['motor1', p1, n1]]
       .filter(([, old, now]) => fmt(old) !== fmt(now))
       .map(([motor, old, now]) => ({ path: `axes/${axis}/${motor}/pulloff_mm`, label: motor, old: fmt(old), new: fmt(now) }))
     if (edits.length) changes.push({ key: what, label: `${axis.toUpperCase()} pull-offs (${what})`, edits })
   }
-  pulloffs('z', (homesPositive(config.text, 'z') ? 1 : -1) * tiltMm, zMotor0AtXmax, 'tilt', tiltMm)
-  if (!levelOnly) pulloffs('y', (homesPositive(config.text, 'y') ? -1 : 1) * skewMm, yMotor0AtXmax, 'squareness', skewMm)
+  if (what.tilt) pulloffs('z', (homesPositive(config.text, 'z') ? 1 : -1) * tiltMm, zMotor0AtXmax, 'tilt', tiltMm)
+  if (what.square) pulloffs('y', (homesPositive(config.text, 'y') ? -1 : 1) * skewMm, yMotor0AtXmax, 'squareness', skewMm)
 
   // Homing sets the position in whole steps and the soft-limit travel starts exactly at mpos_mm, so a homed
   // position that is not a whole number of steps lands a fraction of a step outside the travel and trips ALARM:2.
@@ -235,18 +271,18 @@ export async function calibrate(io, { levelOnly = false } = {}) {
       softLimitNote(axis, Number(fmt(now)))
     }
   }
-  if (!levelOnly) {
+  if (what.steps) {
     const xRatio = scale('x', W, m.ab, m.dc)
     const yRatio = scale('y', H, m.ad, m.bc)
     if (xRatio != null && yRatio == null) sameScale('y', 'X', xRatio)
     if (yRatio != null && xRatio == null) sameScale('x', 'Y', yRatio)
   }
 
-  const summary = { tiltMm: r3(tiltMm), skewMm: skewMm == null ? null : r3(skewMm), changes, applied: false }
+  const summary = { tiltMm: tiltMm == null ? null : r3(tiltMm), skewMm: skewMm == null ? null : r3(skewMm), changes, applied: false }
   const chosen = await io.review({
     changes,
     notes: [
-      `Z tilt: the X-max side is ${fmt(Math.abs(tiltMm))} mm ${tiltMm >= 0 ? 'lower' : 'higher'} across the gantry.`,
+      ...(tiltMm == null ? [] : [`Z tilt: the X-max side is ${fmt(Math.abs(tiltMm))} mm ${tiltMm >= 0 ? 'lower' : 'higher'} across the gantry.`]),
       ...(skewMm == null ? [] : [`Squareness: the X-max side is ${fmt(Math.abs(skewMm))} mm ${skewMm >= 0 ? 'ahead' : 'behind'} across the gantry.`]),
       ...notes,
     ],

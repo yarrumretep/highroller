@@ -11,7 +11,7 @@
   import Wizard from './components/Wizard.svelte'
   import { machine, send } from './lib/machine.svelte.js'
   import { job } from './lib/job.svelte.js'
-  import { calibrate, levelGantry } from './lib/calibration.js'
+  import { calibrate } from './lib/calibration.js'
   import { flatnessProbe } from './lib/flatnessProbe.js'
   import { flatness } from './lib/flatness.svelte.js'
   import { unhomedNote } from './lib/homing.js'
@@ -21,7 +21,6 @@
   // Mounted at the top level, not inside the Tools tab section: a layout change to the phone breakpoint
   // mid-run must not hide the dialog behind a `display: none` tab while the page stays inert.
   let calibrating = $state(false)
-  let leveling = $state(false)
   let flattening = $state(false)
 
   // Tap-to-go is a machine-coordinate move: raise clear of the stock first, same rule as Dro's Go to XY0.
@@ -39,7 +38,6 @@
 <TopBar />
 <ConfirmDialog />
 {#if calibrating}<Wizard script={calibrate} title="Calibrate" onclose={s => { if (s?.applied) flatness.last = null; calibrating = false }} />{/if}
-{#if leveling}<Wizard script={levelGantry} title="Level the gantry" onclose={s => { if (s?.applied) flatness.last = null; leveling = false }} />{/if}
 {#if flattening}<Wizard script={flatnessProbe} title="Flatness map" onclose={s => { if (s?.kind === 'flatness') flatness.last = { ...s, at: Date.now() }; flattening = false }} />{/if}
 
 <main>
@@ -66,7 +64,7 @@
     <Overrides />
   </section>
   <section class:off={tab !== 'tools'}>
-    <Tools onstart={() => (calibrating = true)} onlevel={() => (leveling = true)} onflatten={() => (flattening = true)} onopen={() => (tab = 'job')} />
+    <Tools onstart={() => (calibrating = true)} onflatten={() => (flattening = true)} onopen={() => (tab = 'job')} />
   </section>
   <section class:off={tab !== 'more'}>
     <Console />
@@ -95,10 +93,14 @@
   .tabs .on { color: white; background: var(--accent); border-color: var(--accent); }
   @media (max-width: 999px) { .off { display: none; } }
   @media (min-width: 1000px) {
-    /* Three columns that share the width: fixed side maxima left the middle 156 px at 1024 px, and its panels spilled over */
-    main { grid-template-columns: minmax(340px, 1fr) minmax(280px, 1.3fr) minmax(320px, 1fr); padding-bottom: 12px; }
+    /* Three columns that share the width: fixed side maxima left the middle 156 px at 1024 px, and its panels spilled over.
+       The page never scrolls: main takes what the top bar leaves (app.css lays the body out as a column), the
+       preview and the console stretch to fill their columns, and a column too tall for the window scrolls by itself. */
+    main { grid-template-columns: minmax(340px, 1fr) minmax(280px, 1.3fr) minmax(320px, 1fr); grid-template-rows: auto 1fr; padding-bottom: 12px; flex: 1; min-height: 0; }
     main > section:nth-child(3), main > section:nth-child(4) { grid-column: 3; }
     main > section:nth-child(1), main > section:nth-child(2) { grid-row: span 2; }
+    section { min-height: 0; overflow-y: auto; }
+    main > section:nth-child(2), main > section:nth-child(4) { display: flex; flex-direction: column; }
     .tabs { display: none; }
   }
 </style>

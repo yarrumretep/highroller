@@ -294,5 +294,5 @@
   .goerr { position: absolute; inset: auto 0 12px; margin: 0; text-align: center; font-size: 14px; font-weight: 600; color: var(--bad); pointer-events: none; }
   .gonote { position: absolute; inset: auto 12px 68px; margin: 0; text-align: center; font-size: 13px; color: var(--muted); pointer-events: none; }
   .goto { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); min-height: 48px; padding: 0 18px; font-weight: 700; color: white; background: var(--accent); border-color: var(--accent); }
-  @media (min-width: 1000px) { .preview { height: 60vh; } }
+  @media (min-width: 1000px) { .preview { flex: 1; height: auto; min-height: 240px; } } /* fills the Job column; the page does not scroll */
 </style>

@@ -30,7 +30,7 @@ Then open `http://<this computer>:5173` on the phone. The app talks to the board
 ## Put it on the board
 
 ```bash
-npm run build     # dist/index.html.gz, about 63 KB
+npm run build     # dist/index.html.gz, about 64 KB
 ```
 
 Upload `dist/index.html.gz` to the board's flash through the stock WebUI (the FluidNC file manager), first under another name such as `highroller.html.gz` and open `http://fluidnc.local/highroller.html`; once you trust it, upload it as `index.html.gz` to replace the stock WebUI (keep a copy of the stock file first).

@@ -11,7 +11,7 @@ const LIFT = ['G91', 'G0 Z5', 'G90']
 // A scripted machine and user, as in calibration.test.js: probes answer in order (an Error is thrown), the grid
 // question gets fixed answers, everything is recorded. The probe touches where the last XY move went.
 // Each step remembers how many lines had been sent when it was shown, so its preview can be checked against what followed.
-function scripted({ probes, answers = [{ cols: 2, rows: 2 }] }) {
+function scripted({ probes, answers = [{ cols: 2, rows: 2, marginMm: 50 }] }) {
   const rec = { sent: [], steps: [], asks: [], busy: [], order: [] }
   const settings = { plateMm: 0.5, marginMm: 50 }
   const io = {
@@ -41,7 +41,7 @@ test('a 2 × 2 grid: home, then four points in serpentine order, each probed and
   assert.deepEqual(moves(rec), xy([[53, 53], [1173, 53], [1173, 2393], [53, 2393]]))
   assert.equal(rec.sent.filter(l => l === 'G0 Z5').length, 4) // one lift per probe
   assert.equal(rec.sent.at(-1), 'G53 G0 Z3') // the top of Z
-  assert.deepEqual(rec.order.slice(0, 3), ['readConfig', 'Flatness map: the grid', 'Before you start'])
+  assert.deepEqual(rec.order.slice(0, 3), ['readConfig', 'Flatness map', 'Before you start'])
 
   // The report is computed from the probed points in grid order (row by row from Y-min, X ascending), not the visiting order
   const grid = [[53, 53, -40], [1173, 53, -40.2], [53, 2393, -40.1], [1173, 2393, -39.9]].map(([x, y, z]) => ({ x, y, z }))
@@ -56,7 +56,7 @@ test('a 2 × 2 grid: home, then four points in serpentine order, each probed and
 })
 
 test('a 3 × 3 grid snakes row by row: X ascending, then descending, then ascending', async () => {
-  const { io, rec } = scripted({ probes: Array(9).fill(-40), answers: [{ cols: 3, rows: 3 }] })
+  const { io, rec } = scripted({ probes: Array(9).fill(-40), answers: [{ cols: 3, rows: 3, marginMm: 50 }] })
   const summary = await flatnessProbe(io)
   assert.deepEqual(moves(rec), xy([[53, 53], [613, 53], [1173, 53], [1173, 1223], [613, 1223], [53, 1223], [53, 2393], [613, 2393], [1173, 2393]]))
   assert.deepEqual(summary.report.heights.map(h => [h.x, h.y]), [[53, 53], [613, 53], [1173, 53], [53, 1223], [613, 1223], [1173, 1223], [53, 2393], [613, 2393], [1173, 2393]])
@@ -120,15 +120,15 @@ test('a probe that can be redone lifts 5 mm and repeats that point; a miss ends 
   assert.ok(!miss.rec.steps.some(s => s.title === 'Point 2 of 4: pick up the plate'))
 })
 
-test('the grid is asked with two fields, 3 × 3 by default, and asked again until both are whole numbers from 2 to 5', async () => {
-  const { io, rec } = scripted({ probes: Array(6).fill(-40), answers: [{ cols: 6, rows: 3 }, { cols: 3, rows: 2.5 }, { cols: 3, rows: 2 }] })
+test('the grid and the margin are asked together, 3 × 3 by default, and asked again until the counts are whole numbers from 2 to 5', async () => {
+  const { io, rec } = scripted({ probes: Array(6).fill(-40), answers: [{ cols: 6, rows: 3, marginMm: 50 }, { cols: 3, rows: 2.5 }, { cols: 3, rows: 2, marginMm: 50 }] })
   await flatnessProbe(io)
   assert.equal(rec.asks.length, 3)
-  assert.deepEqual(rec.asks[0].fields.map(f => f.name), ['cols', 'rows'])
-  assert.deepEqual(rec.asks[0].values, { cols: 3, rows: 3 })
+  assert.deepEqual(rec.asks[0].fields.map(f => f.name), ['cols', 'rows', 'marginMm'])
+  assert.deepEqual(rec.asks[0].values, { cols: 3, rows: 3, marginMm: 50 })
   assert.equal(rec.asks[0].error, null)
   assert.match(rec.asks[1].error, /2 to 5/)
-  assert.deepEqual(rec.asks[1].values, { cols: 6, rows: 3 }) // what was typed stays filled in
+  assert.deepEqual(rec.asks[1].values, { cols: 6, rows: 3, marginMm: 50 }) // what was typed stays filled in
   assert.match(rec.asks[2].error, /2 to 5/)
   assert.equal(moves(rec).length, 6)
 })
@@ -143,12 +143,12 @@ test('a refused command aborts with its message, and a config without travel sto
   await assert.rejects(flatnessProbe(bare.io), /no axis travel/)
   assert.deepEqual(bare.rec.sent, [])
 
-  // A margin of half the Y travel or more leaves nothing to probe: said before the grid is asked
-  const wide = scripted({ probes: [] })
-  wide.settings.marginMm = 1220
-  await assert.rejects(flatnessProbe(wide.io), /^Error: The margin leaves no area to probe: lower it$/)
-  assert.equal(wide.rec.asks.length, 0)
-  assert.deepEqual(wide.rec.sent, [])
+  // A margin of half the Y travel or more leaves nothing to probe: asked again, before anything moves
+  const wide = scripted({ probes: Array(4).fill(-40), answers: [{ cols: 2, rows: 2, marginMm: 1220 }, { cols: 2, rows: 2, marginMm: 50 }] })
+  await flatnessProbe(wide.io)
+  assert.equal(wide.rec.asks[1].error, 'The margin leaves no area to probe: lower it.')
+  assert.equal(wide.rec.asks[1].values.marginMm, 1220) // what was typed stays filled in
+  assert.equal(wide.settings.marginMm, 50) // remembered once accepted
 })
 
 test('resultLines: the tilt per side, the peak to valley before and after the tilt, and the verdict', () => {

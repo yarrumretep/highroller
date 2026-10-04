@@ -99,12 +99,12 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 **Always visible**
 - Connection badge, with the controller's Wi-Fi signal strength next to it (from `$System/Stats`, polled every 15 s; hidden in access-point mode).
 - Machine state.
-- Large STOP button.
+- Large STOP button, with a gear button beside it that opens the Settings sheet (the touch plate thickness, the only setting shown), and the dice logo at the left of the bar. On a phone the bar drops the word beside the connection dot and the Wi-Fi percentage (amended 2026-10-04).
 - An alarm banner when needed, with the reason in plain language and Home / Unlock buttons.
 
 **Layouts**
 - **Phone:** bottom tabs: Jog · Job · Tools · More.
-- **Desktop (1000 px and wider):** one dashboard. Position readout, jog pad and zeroing sit on the left, the preview in the centre, and job controls and overrides on the right. Tools and More open as panels.
+- **Desktop (1000 px and wider):** one dashboard. Position readout, jog pad and zeroing sit on the left, the preview in the centre, and job controls and overrides on the right. Tools and More open as panels. The page never scrolls: the preview and the console stretch to fill their columns, and a column too tall for the window scrolls by itself (amended 2026-10-04).
 - **Desktop keyboard:** arrow keys jog X and Y, PgUp and PgDn jog Z, and `[` and `]` change the step size.
 
 **Jog tab**
@@ -127,7 +127,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 
 **Job tab:** list of files on the SD card, upload, preview, Run / Pause / Resume / Stop, progress, elapsed and remaining time, and overrides.
 
-**Tools tab:** the Calibrate routine, the Flatness map, the Surfacing pass, the Outputs wizard, and the settings form.
+**Tools tab:** an Operations box with three buttons and no prose, Calibrate, Flatness map and Surfacing pass (and later the Outputs wizard), each opening its own panel; under Flatness map, a link to the last map's numbers, analysis and time. No settings form: the touch plate thickness lives behind the gear in the top bar, and everything else is asked on the first page of the operation that needs it (amended 2026-10-04).
 
 **More tab**
 - **Console:** send raw commands and see the output.
@@ -217,13 +217,16 @@ A restart only takes a few seconds and every wizard re-homes anyway, so there is
 
 ### Calibrate (one routine)
 
-One pass measures Z tilt, squareness and X/Y steps per mm from four V-bit dots on tape, and applies everything with a single config write, restart and home. (Amended 2026-10-03: this replaces the separate squaring and Z-tilt wizards; the corner probes give the tilt for free.)
+One pass measures any of Z tilt, squareness and X/Y steps per mm (the first page picks which) and applies everything with a single config write, restart and home. Squareness and steps per mm come from four V-bit dots on tape; Z tilt from the touch-plate probes, which with the dots come free and alone need only the two front corners. (Amended 2026-10-03: this replaces the separate squaring and Z-tilt wizards; the corner probes give the tilt for free.)
 
 **Corners.** A = (X-min, Y-min), B = (X-max, Y-min), C = (X-max, Y-max), D = (X-min, Y-max), each `margin` mm (default 50) inside the travel. The travel comes from the config: `max_travel_mm`, `homing/mpos_mm` and `homing/positive_direction` per axis (FluidNC's default for a missing `positive_direction` is true).
 
+**Span.** The lever arm that turns a measured slope into a pull-off change is the X travel from the config. The motors sit a little further apart than that (the core's width), so one pass corrects most of the error and the check pass takes the rest; the gantry-span setting is gone (amended 2026-10-04).
+
 **The pass.**
+0. **What to calibrate:** the first page has three checkboxes, all ticked (Z tilt, Squareness, Steps per mm), the dot depth (enabled only when squareness or steps per mm is ticked) and the corner margin; at least one box must be ticked and the margin must leave a rectangle, else the page is asked again with the reason. Both numbers are remembered in the settings. Z tilt alone takes the touch plate at corners A and B: no tape, no dot (after the probe and the 5 mm lift the user picks the plate up and Continue moves on), no measurements, the tilt from the front row alone. Squareness or steps per mm takes all four corners with dots; the measuring page asks the diagonals only when squareness is ticked and the sides only when steps per mm is; the review proposes only the ticked kinds, and the done view shows only their numbers (amended 2026-10-04).
 1. **Setup:** fit a V-bit, router off; four pieces of masking tape, the touch plate and clip, calipers or a tape measure. The app reads the config fresh, homes and moves to corner A at the top of Z; the user jogs the bit down to a few millimetres above where the plate will sit (a Z-only jog pad is shown inside the dialog: an X/Y move there would shift dot A away from the corner).
-2. **Each corner, A → B → C → D:** stick tape under the bit, put the plate on it, clip on, tap the plate to the bit (which arms the Probe button), probe (the shared routine above), lift the plate (Continue stays disabled while the probe input is still closed), then the dot: `M5`, lift 2 mm, push down to touch − plate thickness − tape thickness − dot depth (a setting, 0.3 mm by default: a V-bit's mark is only as wide as it is deep) at 100 mm/min, retract to the travel height (first touch + 10 mm, never above the top of Z). Later corners are reached at that height.
+2. **Each corner, A → B → C → D:** stick tape under the bit, put the plate on it, clip on, tap the plate to the bit (which arms the Probe button), probe (the shared routine above), lift the plate (Continue stays disabled while the probe input is still closed), then the dot: `M5`, lift 2 mm, push down to touch − plate thickness − dot depth (from the first page, 0.4 mm by default: below the surface the plate sat on, through any tape; a V-bit's mark is only as wide as it is deep) at 100 mm/min, retract to the travel height (first touch + 10 mm, never above the top of Z). Later corners are reached at that height.
 3. **Measure:** diagonals AC and BD for squareness; optionally sides AB and DC (X) and AD and BC (Y) for steps per mm. Measured between dot centres. An entry more than 1 % or 10 mm (whichever is smaller) away from the length between the probed dots is asked again, with the expected length.
 4. **Compute** (corner positions are where the probe touched, from `[PRB:x,y,z:1]`; the review mentions a corner more than 0.5 mm from where it was sent):
    - Tilt = the average of (zB − zA)/(xB − xA) and (zC − zD)/(xC − xD) from the probe heights (machine Z). Positive means the X-max side is lower. δz = tilt × span.
@@ -236,8 +239,6 @@ One pass measures Z tilt, squareness and X/Y steps per mm from four V-bit dots o
 **Which motor is on which side.** A setting per axis (Y and Z), not shown in the UI: it defaults to the LowRider layout (motor0 at X-min). If a pass leaves more than 1.2× the previous pass's error in the same direction, the app swaps that setting and says so in the review.
 
 **Caveat shown in the routine:** tilt is measured against the surface the tape sits on. If this machine already surfaced the spoilboard, that surface follows the old tilt and the reading comes out near zero; for a true reading put the tape on something the machine didn't cut, such as a straight bar laid across.
-
-**Level the gantry only** (added 2026-10-04): the same routine cut down to the tilt, from Tools → Level the gantry only. Corners A and B only, the touch plate under the bit at each: no tape, no dot (after the probe and the 5 mm lift the user picks the plate up and Continue moves on), no measurements asked. Tilt = (zB − zA)/(xB − xA) × span from the front row alone; the review proposes the Z pull-offs only, the motor-side rule applies to Z, and the summary carries no skew. Apply is the same config write, restart and home.
 
 ### Flatness map
 
@@ -280,10 +281,8 @@ Z steps/mm isn't calibrated: the LowRider's Z is driven by a leadscrew, so its s
 ## Settings
 
 Settings are stored on the board in `highroller.json` (on the flash), so the phone and the desktop share them:
-- gantry span (between the two Y motors; 0, the default, means the X travel from the config);
-- touch-plate thickness (default 0.5 mm, V1 Engineering's plate);
-- tape thickness;
-- corner margin inside the travel;
+- touch-plate thickness (default 0.5 mm, V1 Engineering's plate): the one setting with its own place, the gear in the top bar;
+- dot depth (default 0.4 mm) and corner margin inside the travel (default 50 mm): asked on the calibration's first page (the margin on the flatness map's too) and remembered;
 - which motor is on the X-max side, for Y and for Z (stored, not shown; the swap rule maintains it);
 - jog step size and speeds;
 - the last pass's tilt and skew, for the motor-side swap rule.

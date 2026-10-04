@@ -12,13 +12,12 @@ const DEFAULTS = {
   feedXY: 3000,
   feedZ: 600,
   plateMm: 0.5, // touch plate thickness; V1 Engineering's plate is 0.5 mm
-  tapeMm: 0.1, // masking tape thickness, for the calibration dots
-  dotMm: 0.3, // how far below the tape the calibration dot goes: a V-bit's mark is only as wide as it is deep
-  spanMm: 0, // distance between the two Y (and Z) motors; 0 = not set yet
-  marginMm: 50, // how far inside the travel the calibration corners sit
+  dotMm: 0.4, // how far below the probed surface a calibration dot goes (through any tape): a V-bit's mark is only as wide as it is deep
+  marginMm: 50, // how far inside the travel the calibration corners and the flatness grid sit
   yMotor0AtXmax: false, // which side each twin motor is on
   zMotor0AtXmax: false,
 }
+const DROPPED = ['tapeMm', 'spanMm'] // settings earlier builds saved; forgotten on read, so the file sheds them on its next write
 
 function local() {
   try {
@@ -28,7 +27,8 @@ function local() {
   }
 }
 
-export const settings = $state({ ...DEFAULTS, ...local() })
+const shed = o => { for (const k of DROPPED) delete o[k]; return o }
+export const settings = $state(shed({ ...DEFAULTS, ...local() }))
 const initialJson = JSON.stringify(settings) // settings as the page started; a change from this before the board first answers wins over its copy
 let synced = false // the board's copy has been read (or found missing) since the page loaded
 let onBoard = false // the board's copy has been read on this connection; only then are changes written back
@@ -65,7 +65,7 @@ async function loadFromBoard() {
   }
   if (machine.conn !== 'open') return false // the link dropped meanwhile; the next connection reads it again
   if (board && (synced || JSON.stringify(settings) === initialJson)) {
-    Object.assign(settings, board)
+    Object.assign(settings, shed(board))
     boardJson = JSON.stringify(settings)
   } else {
     boardJson = null // no file yet, or a setting changed before the board first answered: ours are written back
