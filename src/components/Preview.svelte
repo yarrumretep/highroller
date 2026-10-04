@@ -229,7 +229,7 @@
     }
     if (!range) { goError = "The machine's travel is not known yet (config not read)"; return }
     const x = mx(px), y = my(py)
-    if (x < range.X.min || x > range.X.max || y < range.Y.min || y > range.Y.max) { goError = "Outside the machine's reach"; return }
+    if (x < range.X.min || x > range.X.max || y < range.Y.min || y > range.Y.max) { target = null; goError = ''; return } // outside the reach: just clear
     target = { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 }
     goError = ''
   }
