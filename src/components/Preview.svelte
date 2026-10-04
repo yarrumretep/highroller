@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
 
   // Drawn in machine coordinates: the file's work coordinates shifted by the work offset `wco`, the tool at
   // `mpos`. `wpos` supplies the work Z for the red/green rule; `range` is the X/Y travel, if known.
@@ -137,11 +137,12 @@
     fit()
   }
 
-  // A new file or a newly known travel: refit.
+  // A new file or a newly known travel: refit. fit() runs untracked: it reads wco, whose array is renewed
+  // with every WCO report, and tracking that would snap the view back to the fit on every report.
   $effect(() => {
     job
     range
-    if (size.w) fit()
+    if (size.w) untrack(fit)
   })
   // A changed work offset moves the drawn toolpath (only when the values really changed: the array is
   // renewed often, e.g. whenever FluidNC happens to resend WCO with the same numbers). In job-fit mode
@@ -151,8 +152,7 @@
     const w = wco ? wco.join(',') : null
     if (size.w && w !== drawnWco) {
       drawnWco = w
-      if (fitMode === 'job') fit()
-      else redraw()
+      untrack(fitMode === 'job' ? fit : redraw)
     }
   })
   // Progress: add newly finished segments to the trail (or start over if it went backwards).
@@ -271,7 +271,7 @@
 </script>
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="panel preview" aria-label="Toolpath preview" bind:this={box} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} ondblclick={() => { target = null; toggleFit() }}>
+  <div class="panel preview" aria-label="Toolpath preview" bind:this={box} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} ondblclick={() => { target = null; goError = ''; toggleFit() }}>
   <canvas bind:this={base}></canvas>
   <canvas bind:this={trail}></canvas>
   <canvas bind:this={dot}></canvas>
