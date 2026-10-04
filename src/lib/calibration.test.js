@@ -148,6 +148,15 @@ test('stops cleanly when the user cancels at the review', async () => {
   assert.equal(rec.applied, null)
 })
 
+test('one side length is enough for steps per mm', async () => {
+  const { io, rec } = scripted({ probes: [-40, -40, -40, -40], answers: [{ ac: d(1120, 2340), bd: d(1120, 2340), ab: 1121, dc: null, ad: null, bc: null }] })
+  await calibrate(io)
+  const x = rec.review.changes.find(c => c.label === 'X steps per mm')
+  assert.ok(x, 'an X steps-per-mm change from the front side alone')
+  assert.ok(Number(x.edits[0].new) < Number(x.edits[0].old), 'measured long, so fewer steps per mm') // 1121 measured for 1120 commanded
+  assert.ok(!rec.review.changes.some(c => c.label === 'Y steps per mm'))
+})
+
 test('a refused command aborts with its message', async () => {
   const { io } = scripted({ probes: [], answers: [] })
   io.send = async line => ({ ok: line !== '$H', error: 'reset', lines: [] })

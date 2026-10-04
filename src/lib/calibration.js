@@ -193,9 +193,10 @@ export async function calibrate(io) {
   pulloffs('y', (homesPositive(config.text, 'y') ? -1 : 1) * skewMm, yMotor0AtXmax, 'squareness', skewMm)
 
   const scale = (axis, commanded, a, b) => {
-    if (!(a > 0 && b > 0)) return
+    const given = [a, b].filter(v => v > 0) // one side is enough; two are averaged
+    if (!given.length) return
     const cur = Number(getValue(config.text, `axes/${axis}/steps_per_mm`))
-    const now = stepsPerMm(cur, commanded, (a + b) / 2)
+    const now = stepsPerMm(cur, commanded, given.reduce((s, v) => s + v, 0) / given.length)
     if (fmt(cur) !== fmt(now)) changes.push({ label: `${axis.toUpperCase()} steps per mm`, edits: [{ path: `axes/${axis}/steps_per_mm`, old: fmt(cur), new: fmt(now) }] })
   }
   scale('x', W, m.ab, m.dc)

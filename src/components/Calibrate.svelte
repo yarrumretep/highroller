@@ -163,10 +163,25 @@
 
   onMount(() => {
     dialog.showModal()
+    // Measuring takes minutes with nobody touching the computer: hold a screen wake lock so it does not sleep
+    // (the lock is dropped whenever the tab is hidden, so take it again on return), and ask before the page unloads.
+    let lock = null
+    const relock = () => {
+      if (document.visibilityState === 'visible') navigator.wakeLock?.request('screen').then(l => (lock = l)).catch(() => {})
+    }
+    relock()
+    document.addEventListener('visibilitychange', relock)
+    const guard = e => { if (view.kind !== 'done' && view.kind !== 'error') { e.preventDefault(); e.returnValue = '' } }
+    addEventListener('beforeunload', guard)
     calibrate(io)
       .then(summary => (view = { kind: 'done', summary }))
       .catch(e => (view = { kind: 'error', text: e.message }))
-    return abort // an unmount (e.g. the dialog is torn down some other way) ends the routine too
+    return () => {
+      abort() // an unmount (e.g. the dialog is torn down some other way) ends the routine too
+      lock?.release().catch(() => {})
+      document.removeEventListener('visibilitychange', relock)
+      removeEventListener('beforeunload', guard)
+    }
   })
 
   function next() {
