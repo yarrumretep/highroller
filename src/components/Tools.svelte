@@ -64,18 +64,20 @@
     try {
       const a = { xMin: 0, xMax: W, yMin: 0, yMax: H }
       const name = surfacingName({ ...a, depth: cut.depth })
-      const file = new File([surfacingGcode({ ...a, ...cut })], name, { type: 'text/plain' })
+      // The file carries its own origin line too, so it cuts at this corner even if it is reopened later
+      const file = new File([surfacingGcode({ ...a, ...cut, origin: { x: area.xMin, y: area.yMin } })], name, { type: 'text/plain' })
       if (machine.status.state !== 'Idle') return (failed = `Wait for Idle (now ${machine.status.state})`)
       // First the origin, so the Job preview shows the file where it will cut
       const r = await send(originLine)
       if (!r.ok) return (failed = `${originLine} failed: ${r.error}`)
+      const moved = `Work X0 Y0 is now at the cut's corner (${originLine}). ` // from here on, say so if Create does not finish
       const before = job.data
       job.error = ''
       await refresh('') // the root's listing, so a file of the same name is asked about before it is replaced
-      if (job.error) return (failed = job.error) // no upload against a listing that could not be read
+      if (job.error) return (failed = moved + job.error) // no upload against a listing that could not be read
       await upload(file, '') // which opens it in the Job panel once it is up
       if (job.name === name && job.data !== before) onopen?.()
-      else failed = job.error // empty when a replace was declined
+      else failed = moved + (job.error || "Not replaced: the SD card's file was kept.")
     } catch (e) {
       failed = e.message
     } finally {

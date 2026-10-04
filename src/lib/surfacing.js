@@ -2,7 +2,8 @@
 // Work coordinates: Z0 is the highest point of the area, X0 Y0 its minimum corner (the caller sets that zero).
 const num = v => String(Math.round(v * 1000) / 1000) // G-code numbers: at most 3 decimals, no trailing zeros
 
-export function surfacingGcode({ xMin, xMax, yMin, yMax, diameter = 25.4, stepoverPct = 40, depth, depthPerPass = 0.5, feed = 2500, plungeFeed = 300, safeZ = 5 }) {
+// origin: the work X0 Y0 in machine coordinates, written into the file so it always cuts at its own corner.
+export function surfacingGcode({ xMin, xMax, yMin, yMax, diameter = 25.4, stepoverPct = 40, depth, depthPerPass = 0.5, feed = 2500, plungeFeed = 300, safeZ = 5, origin = null }) {
   const radius = diameter / 2
   const x0 = xMin - radius, x1 = xMax + radius
   const step = diameter * stepoverPct / 100
@@ -17,7 +18,9 @@ export function surfacingGcode({ xMin, xMax, yMin, yMax, diameter = 25.4, stepov
   for (let j = 1; j * depthPerPass < depth - 1e-9; j++) passes.push(-(j * depthPerPass))
   passes.push(-depth)
 
-  const lines = ['G21 G90 G94 G54', `G0 Z${num(safeZ)}`, `G0 X${num(x0)} Y${num(yMin)}`, 'M0'] // G54: the zero the flatness map sets
+  const lines = ['G21 G90 G94 G54'] // G54: the zero Create and the flatness map set
+  if (origin) lines.push(`G10 L2 P1 X${num(origin.x)} Y${num(origin.y)}`) // Z0 stays whatever was set at the highest point
+  lines.push(`G0 Z${num(safeZ)}`, `G0 X${num(x0)} Y${num(yMin)}`, 'M0')
   let rightward = true // the tool starts at x0, so the first sweep goes toward x1
   for (let p = 0; p < passes.length; p++) {
     const z = passes[p]

@@ -9,6 +9,14 @@ test('a zero or negative stepover, depth, depth per pass or area is refused, not
   }
 })
 
+test('an origin is written into the file right after the header, and left out otherwise', () => {
+  const ok = { xMin: 0, xMax: 100, yMin: 0, yMax: 50, diameter: 25.4, stepoverPct: 40, depth: 0.5, depthPerPass: 0.5 }
+  const lines = surfacingGcode({ ...ok, origin: { x: 16.7, y: 16.7 } }).split('\n')
+  assert.equal(lines[0], 'G21 G90 G94 G54')
+  assert.equal(lines[1], 'G10 L2 P1 X16.7 Y16.7')
+  assert.ok(!surfacingGcode(ok).includes('G10'))
+})
+
 test('rows raster across the area, capped at the far edge', () => {
   const text = surfacingGcode({ xMin: 0, xMax: 100, yMin: 0, yMax: 50, diameter: 25.4, stepoverPct: 40, depth: 0.5, depthPerPass: 0.5 })
   const ys = [0, ...[...text.matchAll(/^G1 Y(-?[\d.]+)/gm)].map(m => Number(m[1]))]
