@@ -6,6 +6,8 @@ export function surfacingGcode({ xMin, xMax, yMin, yMax, diameter = 25.4, stepov
   const radius = diameter / 2
   const x0 = xMin - radius, x1 = xMax + radius
   const step = diameter * stepoverPct / 100
+  // The loops below count up by step and by pass: a zero or negative one would never end
+  if (!(step > 0 && depthPerPass > 0 && depth > 0 && xMax > xMin && yMax > yMin)) throw new Error('Surfacing needs a positive area, stepover, depth and depth per pass')
 
   const rows = []
   for (let i = 0; yMin + i * step < yMax - 1e-9; i++) rows.push(yMin + i * step)

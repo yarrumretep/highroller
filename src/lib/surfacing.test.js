@@ -2,6 +2,13 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { surfacingGcode, surfacingName } from './surfacing.js'
 
+test('a zero or negative stepover, depth, depth per pass or area is refused, not looped on', () => {
+  const ok = { xMin: 0, xMax: 100, yMin: 0, yMax: 50, diameter: 25.4, stepoverPct: 40, depth: 0.5, depthPerPass: 0.5 }
+  for (const bad of [{ stepoverPct: 0 }, { stepoverPct: -5 }, { diameter: 0 }, { depthPerPass: 0 }, { depth: 0 }, { xMax: 0 }, { yMax: -1 }]) {
+    assert.throws(() => surfacingGcode({ ...ok, ...bad }), /positive/, JSON.stringify(bad))
+  }
+})
+
 test('rows raster across the area, capped at the far edge', () => {
   const text = surfacingGcode({ xMin: 0, xMax: 100, yMin: 0, yMax: 50, diameter: 25.4, stepoverPct: 40, depth: 0.5, depthPerPass: 0.5 })
   const ys = [0, ...[...text.matchAll(/^G1 Y(-?[\d.]+)/gm)].map(m => Number(m[1]))]
