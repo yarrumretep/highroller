@@ -86,7 +86,7 @@
       answers = Object.fromEntries(Object.entries(q.values ?? {}).filter(([, v]) => v != null)) // asked again: keep what was typed
       resolve = res; reject = rej; view = { kind: 'ask', ...q }
     }),
-    review: r => new Promise((res, rej) => { ticked = r.changes.map(() => true); resolve = res; reject = rej; view = { kind: 'review', ...r } }),
+    review: r => new Promise((res, rej) => { ticked = r.changes.map(c => !c.unticked); resolve = res; reject = rej; view = { kind: 'review', ...r } }),
     // The second argument is the config the pass was computed from.
     async apply(text, { name, text: old }) {
       throwIfStopped()

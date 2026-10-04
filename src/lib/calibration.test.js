@@ -155,6 +155,10 @@ test('one side length is enough for steps per mm', async () => {
   assert.ok(x, 'an X steps-per-mm change from the front side alone')
   assert.ok(Number(x.edits[0].new) < Number(x.edits[0].old), 'measured long, so fewer steps per mm') // 1121 measured for 1120 commanded
   assert.ok(!rec.review.changes.some(c => c.label === 'Y steps per mm'))
+  // the unmeasured axis is offered the same scale, unticked
+  const y = rec.review.changes.find(c => c.label.startsWith('Y steps per mm (same scale as X'))
+  assert.ok(y?.unticked, 'an unticked Y entry')
+  assert.equal(Number(y.edits[0].new), Number((Number(y.edits[0].old) * Number(x.edits[0].new) / Number(x.edits[0].old)).toFixed(3)))
 })
 
 test('a refused command aborts with its message', async () => {

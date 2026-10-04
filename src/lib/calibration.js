@@ -194,13 +194,22 @@ export async function calibrate(io) {
 
   const scale = (axis, commanded, a, b) => {
     const given = [a, b].filter(v => v > 0) // one side is enough; two are averaged
-    if (!given.length) return
+    if (!given.length) return null
     const cur = Number(getValue(config.text, `axes/${axis}/steps_per_mm`))
     const now = stepsPerMm(cur, commanded, given.reduce((s, v) => s + v, 0) / given.length)
     if (fmt(cur) !== fmt(now)) changes.push({ label: `${axis.toUpperCase()} steps per mm`, edits: [{ path: `axes/${axis}/steps_per_mm`, old: fmt(cur), new: fmt(now) }] })
+    return now / cur
   }
-  scale('x', W, m.ab, m.dc)
-  scale('y', H, m.ad, m.bc)
+  const xRatio = scale('x', W, m.ab, m.dc)
+  const yRatio = scale('y', H, m.ad, m.bc)
+  // Only one axis measured: offer the other the same scale, unticked (same belts, but not the same pulleys or tension).
+  const sameScale = (axis, from, ratio) => {
+    const cur = Number(getValue(config.text, `axes/${axis}/steps_per_mm`))
+    const now = cur * ratio
+    if (fmt(cur) !== fmt(now)) changes.push({ label: `${axis.toUpperCase()} steps per mm (same scale as ${from}, unmeasured)`, unticked: true, edits: [{ path: `axes/${axis}/steps_per_mm`, old: fmt(cur), new: fmt(now) }] })
+  }
+  if (xRatio != null && yRatio == null) sameScale('y', 'X', xRatio)
+  if (yRatio != null && xRatio == null) sameScale('x', 'Y', yRatio)
 
   const summary = { tiltMm: r3(tiltMm), skewMm: r3(skewMm), changes, applied: false }
   const chosen = await io.review({
