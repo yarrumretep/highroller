@@ -298,8 +298,8 @@
       <p>{l.tilt}</p>
       <p>{l.flatness}</p>
       <p><strong>{l.verdict}</strong></p>
-      <p class="muted">Work X0 Y0 at the probed area's corner, Z0 on the table at the highest point. This line runs: <span class="mono">{view.summary.zeroLine}</span></p>
-      <button class="go" disabled={!!zeroBlocked(view.summary)} title={zeroBlocked(view.summary)} onclick={async () => (zeroed = await zeroAt(view.summary.zeroLine))}>Zero at the highest point</button>
+      <p class="muted">Work Z0 on the table at the highest point. This line runs: <span class="mono">{view.summary.zeroLine}</span></p>
+      <button class="go" disabled={!!zeroBlocked(view.summary)} title={zeroBlocked(view.summary)} onclick={async () => (zeroed = await zeroAt(view.summary.zeroLine))}>Zero Z at the highest point</button>
       {#if zeroed}<p>{zeroed}</p>{/if}
     {:else if view.kind === 'done'}
       <p>{view.summary.applied ? 'Applied. Put fresh tape on the same spots and run again to check the result.' : 'Nothing was changed.'}</p>

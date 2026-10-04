@@ -101,8 +101,8 @@
     <p>{l.tilt}</p>
     <p>{l.flatness}</p>
     <p><strong>{l.verdict}</strong></p>
-    <p class="muted">Work X0 Y0 at the probed area's corner, Z0 on the table at the highest point: <span class="mono">{flatness.last.zeroLine}</span></p>
-    <button disabled={!!zeroBlocked(flatness.last)} title={zeroBlocked(flatness.last)} onclick={async () => (zeroed = await zeroAt(flatness.last.zeroLine))}>Zero at the highest point</button>
+    <p class="muted">Work Z0 on the table at the highest point: <span class="mono">{flatness.last.zeroLine}</span></p>
+    <button disabled={!!zeroBlocked(flatness.last)} title={zeroBlocked(flatness.last)} onclick={async () => (zeroed = await zeroAt(flatness.last.zeroLine))}>Zero Z at the highest point</button>
     {#if stale(flatness.last)}<p class="err">{stale(flatness.last)}</p>{/if}
     {#if zeroed}<p>{zeroed}</p>{/if}
   {/if}
@@ -115,7 +115,7 @@
   {/each}
   {#if area}
     <p>Area {W} × {H} mm: the whole table the cutter can reach.</p>
-    <p>Create sets work X0 Y0 at the area's corner. Set Z0 first: Zero at the highest point after a flatness map, or Probe Z0 on the table's highest spot.</p>
+    <p>Create sets work X0 Y0 at the cut's corner. Z0 comes from Zero Z at the highest point after a flatness map, or a Probe Z0 by hand on the table's highest spot.</p>
     <p class="muted">Create sends <span class="mono">{originLine}</span>, then uploads the file and opens it. The file stops before the first cut so the router can be switched on; Resume starts it.</p>
   {/if}
   <button class="go" disabled={!!blocked || making} onclick={create}>Create and open</button>

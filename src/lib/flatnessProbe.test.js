@@ -49,8 +49,8 @@ test('a 2 × 2 grid: home, then four points in serpentine order, each probed and
   assert.deepEqual(summary.report, flatnessReport(grid, { threshold: 0.15 }))
   assert.deepEqual(summary.grid, { cols: 2, rows: 2 })
   assert.deepEqual(summary.area, { xMin: 53, xMax: 1173, yMin: 53, yMax: 2393 })
-  // Work X0 Y0 at the area's corner; Z0 on the table at the highest point, one plate thickness below the touch
-  assert.equal(summary.zeroLine, 'G10 L2 P1 X53 Y53 Z-40.4')
+  // Z only, on the table at the highest point: one plate thickness below the touch. X0 Y0 are Create's (the surfacing card).
+  assert.equal(summary.zeroLine, 'G10 L2 P1 Z-40.4')
   // The config it ran with: a later calibration that changes it makes the map stale
   assert.equal(summary.configText, CONFIG)
 })

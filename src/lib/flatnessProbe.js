@@ -60,7 +60,7 @@ export async function flatnessProbe(io) {
 
   await io.step({
     title: 'Before you start',
-    text: `Fit the bit you will surface with (the zero at the highest point is for the bit that probed) and make sure the router is off. You need the touch plate and its clip. The bit visits ${n} points (${cols} × ${rows}), row by row; at each one the plate goes under the bit and is probed, then you pick it up before the next move.`,
+    text: `Fit the bit you will surface with (Zero Z at the highest point is for the bit that probed) and make sure the router is off. You need the touch plate and its clip. The bit visits ${n} points (${cols} × ${rows}), row by row; at each one the plate goes under the bit and is probed, then you pick it up before the next move.`,
     lines: [homeLine, ...firstMove],
   })
   io.busy('Homing…')
@@ -116,8 +116,9 @@ export async function flatnessProbe(io) {
   // Grid order (row by row from Y-min, X ascending), so a caller can lay the heights out as the table
   const probed = [...points].sort((a, b) => a.j - b.j || a.i - b.i).map(p => p.probed)
   const report = flatnessReport(probed, { threshold: THRESHOLD_MM })
-  // The touch is one plate thickness above the table: work Z0 goes on the table itself, as the Z0 probe does
-  const zeroLine = `G10 L2 P1 X${num(xMin)} Y${num(yMin)} Z${num(report.highest.z - s.plateMm)}`
+  // Z only: X0 Y0 belong to the surfacing pass's corner. The touch is one plate thickness above the table, so
+  // work Z0 goes on the table itself, as the Z0 probe does.
+  const zeroLine = `G10 L2 P1 Z${num(report.highest.z - s.plateMm)}`
   // configText: a calibration applied since (steps/mm, pull-offs) moves the table under these numbers
   return { kind: 'flatness', report, area: { xMin, xMax, yMin, yMax }, grid: { cols, rows }, zeroLine, configText: config.text }
 }
