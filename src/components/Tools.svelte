@@ -8,7 +8,7 @@
   import { unhomedNote } from '../lib/homing.js'
 
   // onopen: the surfacing file is open in the Job panel, so show it
-  let { onstart, onflatten, onopen } = $props()
+  let { onstart, onlevel, onflatten, onopen } = $props()
   // A blank, invalid or negative field keeps the previous value rather than becoming 0 (or negative).
   const num = (key, e) => {
     const v = e.currentTarget.value
@@ -90,6 +90,8 @@
   <h2>Calibrate</h2>
   <p>Four V-bit dots on tape, one measuring session, one restart: Z tilt, squareness and steps per mm.</p>
   <button class="go" disabled={!canStart} onclick={onstart}>Start calibration</button>
+  <p>Just the Z tilt: the touch plate at the two front corners, no tape, no measuring.</p>
+  <button disabled={!canStart} onclick={onlevel}>Level the gantry only</button>
   {#if !machine.config}<p class="muted">Waiting for the machine's config (it is read while idle).</p>{/if}
 </div>
 

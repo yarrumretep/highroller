@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { calibrate, badEdit } from './calibration.js'
+import { calibrate, levelGantry, badEdit } from './calibration.js'
 import { getValue } from './yaml-edit.js'
 import { skew } from './calib.js'
 
@@ -329,4 +329,26 @@ test('badEdit accepts an edit that keeps the lines, and names what is wrong othe
   assert.equal(badEdit(old, old.replace('50', '49.9')), null)
   assert.match(badEdit(old, old + 'extra: 1\n'), /number of lines/)
   assert.match(badEdit(old, old.replace('  # a comment', '[MSG:INFO: auto report interval set to 100]')), /line 3/)
+})
+
+test('level only: the plate at the two front corners, no dots, no measuring, and just the Z pull-offs change', async () => {
+  const { io, rec } = scripted({ probes: [-40, -39.5], answers: [] })
+  const summary = await levelGantry(io)
+  assert.deepEqual(rec.sent.filter(l => l.startsWith('G53 G0 X')), ['G53 G0 X53 Y53', 'G53 G0 X1173 Y53'])
+  assert.ok(!rec.sent.some(l => l.startsWith('G53 G1') || l === 'M5'), 'no dot is made')
+  assert.equal(rec.asks.length, 0)
+  assert.deepEqual(rec.steps.map(st => st.title), ['Before you start', 'Corner A: set the height', 'Corner A: touch plate', 'Corner A: pick up the plate', 'Corner B: touch plate', 'Corner B: pick up the plate'])
+  // The pick-up step previews what Continue runs: the rapid up, then the next corner (or, after B, the final rapid up)
+  assert.deepEqual(rec.steps[3].lines, ['G53 G0 Z-30', 'G4 P0', 'G53 G0 Z-30', 'G53 G0 X1173 Y53'])
+  assert.deepEqual(rec.steps[5].lines, ['G53 G0 Z-30', 'G4 P0', 'G53 G0 Z3'])
+  assert.equal(rec.sent.at(-1), 'G53 G0 Z3')
+  assert.ok(Math.abs(summary.tiltMm - 0.5357) < 0.001, `tilt ${summary.tiltMm}`)
+  assert.equal(summary.skewMm, null)
+  assert.deepEqual(paths(rec.review.changes), ['axes/z/motor0/pulloff_mm', 'axes/z/motor1/pulloff_mm'])
+  assert.ok(!rec.review.notes.some(n => n.startsWith('Squareness')))
+  assert.equal(getValue(rec.applied, 'axes/z/motor0/pulloff_mm'), '4.268')
+  assert.equal(getValue(rec.applied, 'axes/z/motor1/pulloff_mm'), '3.732')
+  assert.equal(getValue(rec.applied, 'axes/y/motor0/pulloff_mm'), '4.000')
+  assert.equal(io.settings.lastTiltMm.toFixed(3), '0.536')
+  assert.equal(io.settings.lastSkewMm, undefined)
 })

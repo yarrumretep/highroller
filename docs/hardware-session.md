@@ -39,12 +39,27 @@ Router unplugged (spindle off) for everything up to the air-cut; a hand near the
 16. **Pass 2** with fresh tape on the same spots. Pass: the remaining error is smaller; `config.yaml.bak` is unchanged. If the review says it swapped a motor side, note it: the machine's layout or sign differs from the assumption, and the next pass should improve.
 17. **Abort paths.** Cancel at a waiting step; STOP during a corner move. Pass: "Stopped" and nothing else moves.
 18. **Recovery drill.** Once, restore `config.yaml` from `config.yaml.bak` with the stock WebUI, so the way back is known.
+19. **Level the gantry only.** Tools → Level the gantry only: corner A with the plate (no tape), lift, pick the plate up, Continue; the same at corner B. Pass: the review lists just the Z pull-offs, the tilt matches the last full pass, and the done view shows tilt without a skew. Apply, home, run it again: the tilt should be near zero.
 
 ## Flatness map and surfacing (after calibration)
 
-19. **Flatness map.** Tools → Probe the table, 3 × 3 to start. At each point: tape is not needed, just the plate on the table under the bit, clip on, tap to arm, Probe; the bit lifts, pick the plate up, Continue. Pass: the result table shows heights of 0 or below with the highest cell marked, the tilt matches what the calibration left (near zero after a good pass), and the verdict says "Flat enough" or gives a depth. Press **Zero Z at the highest point**: the Z readout changes by the plate thickness plus the lift.
-20. **Surfacing pass.** Check the cutter diameter (25.4 for the 1" bit), leave stepover 40 % and depth per pass 0.5, and the depth from the map. **Create and open** sets work X0 Y0 at the cut's corner (the readout shows negative X and Y while the bit is at home), uploads the file and opens it. Pass: the preview fills the dashed outline. Run: the job holds at the first corner with the router off; switch the router on, press Resume, and watch the first row. STOP is hold then reset, as always. Expect about two hours for a full table at 2500 mm/min with a 1" bit.
+20. **Flatness map.** Tools → Probe the table, 3 × 3 to start. At each point: tape is not needed, just the plate on the table under the bit, clip on, tap to arm, Probe; the bit lifts, pick the plate up, Continue. Pass: the result table shows heights of 0 or below with the highest cell marked, the tilt matches what the calibration left (near zero after a good pass), and the verdict says "Flat enough" or gives a depth. Press **Zero Z at the highest point**: the Z readout changes by the plate thickness plus the lift.
+21. **Surfacing pass.** Check the cutter diameter (25.4 for the 1" bit), leave stepover 40 % and depth per pass 0.5, and the depth from the map. **Create and open** sets work X0 Y0 at the cut's corner (the readout shows negative X and Y while the bit is at home), uploads the file and opens it. Pass: the preview fills the dashed outline. Run: the job holds at the first corner with the router off; switch the router on, press Resume, and watch the first row. STOP is hold then reset, as always. Expect about two hours for a full table at 2500 mm/min with a 1" bit.
 
 ## Soft limits and a corrected steps-per-mm
 
 With `soft_limits: true`, an axis's travel starts exactly at its `homing/mpos_mm`. Homing sets the position in whole motor steps, so once steps-per-mm is no longer a round number (after a steps/mm correction), a non-zero `mpos_mm` such as 3 lands a fraction of a step outside the travel (3 mm × 50.05 = 150.15 steps → 150 steps → 2.997 mm) and the first move after homing raises ALARM:2 "Soft limit". Fix: set `mpos_mm: 0.000` for that axis (and add 3 to `max_travel_mm` to keep the same far end), then home again. Zero times any steps-per-mm is exact.
+
+## Stopping at the switches
+
+An over-jog runs into a switch and chatters against it (the stepper skipping), bending the switch arm and with it the home position. Two settings stop that; both are set live with `$/…` and kept with `$CD=config.yaml` (FluidNC 3.9.9, checked in its source):
+
+- `soft_limits: true` on an axis clamps every jog to the travel: a hold-to-run jog stops at the travel's edge with no alarm and no contact (`Cartesian::constrain_jog`), and a G0/G1 past it is refused with ALARM:2 before it starts. It needs a homed machine and a right `max_travel_mm`, and the `mpos_mm` note above applies to every axis whose steps-per-mm is no longer a round number.
+- `hard_limits: true` on an axis makes any switch closure outside homing an immediate stop: ALARM:1, steppers off, position forgotten. Recover with STOP (a reset), Unlock, a jog away from the switch (FluidNC allows a nudge of up to the pull-off off an active switch), then Home. The catch: noise on a switch wire trips a false ALARM:1 mid-job, so try it on jogs for a while before trusting it under a cut.
+
+```
+$/axes/z/soft_limits=true
+$/axes/z/hard_limits=true
+$CD=config.yaml
+$H
+```

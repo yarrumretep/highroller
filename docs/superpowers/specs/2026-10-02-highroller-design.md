@@ -237,6 +237,8 @@ One pass measures Z tilt, squareness and X/Y steps per mm from four V-bit dots o
 
 **Caveat shown in the routine:** tilt is measured against the surface the tape sits on. If this machine already surfaced the spoilboard, that surface follows the old tilt and the reading comes out near zero; for a true reading put the tape on something the machine didn't cut, such as a straight bar laid across.
 
+**Level the gantry only** (added 2026-10-04): the same routine cut down to the tilt, from Tools → Level the gantry only. Corners A and B only, the touch plate under the bit at each: no tape, no dot (after the probe and the 5 mm lift the user picks the plate up and Continue moves on), no measurements asked. Tilt = (zB − zA)/(xB − xA) × span from the front row alone; the review proposes the Z pull-offs only, the motor-side rule applies to Z, and the summary carries no skew. Apply is the same config write, restart and home.
+
 ### Flatness map
 
 A wizard in the same dialog, under the same rules, that maps the table with the touch plate. (Added 2026-10-04.)

@@ -303,7 +303,7 @@
       {#if zeroed}<p>{zeroed}</p>{/if}
     {:else if view.kind === 'done'}
       <p>{view.summary.applied ? 'Applied. Put fresh tape on the same spots and run again to check the result.' : 'Nothing was changed.'}</p>
-      <p class="mono">Tilt {view.summary.tiltMm} mm · Skew {view.summary.skewMm} mm</p>
+      <p class="mono">Tilt {view.summary.tiltMm} mm{#if view.summary.skewMm != null} · Skew {view.summary.skewMm} mm{/if}</p>
     {:else if view.kind === 'error'}
       <p class="err">{view.text}</p>
     {/if}
