@@ -23,7 +23,7 @@
 
 <header>
   <!-- A pair of sixes, the same as the tab icon -->
-  <svg class="logo" viewBox="0 0 64 64" width="30" height="30" aria-label="HighRoller">
+  <svg class="logo" viewBox="4 4 56 56" width="44" height="44" aria-label="HighRoller">
     <defs>
       <g id="six" fill="#fff">
         <circle cx="-7" cy="-7" r="2.6" /><circle cx="7" cy="-7" r="2.6" /><circle cx="-7" cy="0" r="2.6" />
