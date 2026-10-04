@@ -1,4 +1,6 @@
-// Surfacing: a serpentine raster that skims an area flat in equal depth passes down to `depth`.
+// Surfacing: a one-way raster that skims an area flat in equal depth passes down to `depth`. Every row cuts
+// toward +X (left to right), with a lift to safeZ and a rapid back between rows, so each row is the same cut
+// (climb or conventional) and the finish has one grain.
 // Work coordinates: Z0 is the highest point of the area, X0 Y0 its minimum corner (the caller sets that zero).
 const num = v => String(Math.round(v * 1000) / 1000) // G-code numbers: at most 3 decimals, no trailing zeros
 
@@ -21,17 +23,10 @@ export function surfacingGcode({ xMin, xMax, yMin, yMax, diameter = 25.4, stepov
   const lines = ['G21 G90 G94 G54'] // G54: the zero Create and the flatness map set
   if (origin) lines.push(`G10 L2 P1 X${num(origin.x)} Y${num(origin.y)}`) // Z0 stays whatever was set at the highest point
   lines.push(`G0 Z${num(safeZ)}`, `G0 X${num(x0)} Y${num(yMin)}`, 'M0')
-  let rightward = true // the tool starts at x0, so the first sweep goes toward x1
-  for (let p = 0; p < passes.length; p++) {
-    const z = passes[p]
-    // Each pass covers the whole area again, deeper; alternating row order keeps the tool where the last pass left it.
-    const order = p % 2 === 0 ? rows : rows.slice().reverse()
-    order.forEach((y, r) => {
-      if (r > 0) lines.push(`G1 Y${num(y)}`) // next row, still at cutting depth: no lift
-      if (r === 0) lines.push(`G1 Z${num(z)} F${num(plungeFeed)}`) // plunge to this pass's depth
-      lines.push(`G1 X${num(rightward ? x1 : x0)} F${num(feed)}`)
-      rightward = !rightward
-    })
+  // Each pass covers the whole area again, deeper. Every row: lift, rapid to its left end, plunge, cut to the right.
+  // (The first row's lift and rapid are zero-length: the tool already waits there.)
+  for (const z of passes) {
+    for (const y of rows) lines.push(`G0 Z${num(safeZ)}`, `G0 X${num(x0)} Y${num(y)}`, `G1 Z${num(z)} F${num(plungeFeed)}`, `G1 X${num(x1)} F${num(feed)}`)
   }
   lines.push(`G0 Z${num(safeZ)}`, `G0 X${num(x0)} Y${num(yMin)}`)
   return lines.join('\n') + '\n'

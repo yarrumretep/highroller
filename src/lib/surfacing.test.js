@@ -19,8 +19,20 @@ test('an origin is written into the file right after the header, and left out ot
 
 test('rows raster across the area, capped at the far edge', () => {
   const text = surfacingGcode({ xMin: 0, xMax: 100, yMin: 0, yMax: 50, diameter: 25.4, stepoverPct: 40, depth: 0.5, depthPerPass: 0.5 })
-  const ys = [0, ...[...text.matchAll(/^G1 Y(-?[\d.]+)/gm)].map(m => Number(m[1]))]
+  const ys = [...new Set([...text.matchAll(/^G0 X-12\.7 Y(-?[\d.]+)/gm)].map(m => Number(m[1])))]
   assert.deepEqual(ys, [0, 10.16, 20.32, 30.48, 40.64, 50])
+})
+
+test('every row cuts left to right, with a lift, a rapid back to X min and a plunge before the next', () => {
+  const lines = surfacingGcode({ xMin: 0, xMax: 100, yMin: 0, yMax: 10, depth: 1, depthPerPass: 0.5 }).trim().split('\n')
+  const cuts = lines.map((l, i) => [l, i]).filter(([l]) => /^G1 X/.test(l))
+  assert.equal(cuts.length, 2 * 2) // two rows (Y0 and Y10) in each of two passes
+  assert.ok(cuts.every(([l]) => l === 'G1 X112.7 F2500'), 'no cut runs toward X min')
+  for (const [, i] of cuts.slice(0, -1)) {
+    assert.equal(lines[i + 1], 'G0 Z5')
+    assert.match(lines[i + 2], /^G0 X-12\.7 Y(0|10)$/)
+    assert.match(lines[i + 3], /^G1 Z-(0\.5|1) F300$/)
+  }
 })
 
 test('depth passes step down in equal increments, the last exactly at the full depth', () => {
