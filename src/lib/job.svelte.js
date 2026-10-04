@@ -75,7 +75,8 @@ export async function upload(file, dir = job.dir) {
   }
   job.upload = 0
   try {
-    job.files = await sd.upload(file, dir, p => (job.upload = p))
+    await sd.upload(file, dir, p => (job.upload = p))
+    job.files = await sd.list(dir) // the upload's own reply lists the root on 3.9.9 (no path argument), not this folder
     await load(dir ? `${dir}/${file.name}` : file.name, file.size, await file.text())
   } catch (e) {
     job.error = e.message
