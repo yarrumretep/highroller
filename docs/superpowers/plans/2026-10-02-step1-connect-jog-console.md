@@ -1650,7 +1650,7 @@ In the stock WebUI console, or in HighRoller's console in Step 2, run `$Build/In
 
 - [ ] **Step 2: Point the dev server at the board**
 
-Run: `VITE_FLUIDNC_HOST=192.168.40.174 npm run dev`, then open `http://localhost:5173`.
+Run: `VITE_FLUIDNC_HOST=192.168.1.50 npm run dev`, then open `http://localhost:5173`.
 
 Expected:
 - The badge shows "Connected".
@@ -1669,7 +1669,7 @@ Expected:
 
 1. Run `npm run build`.
 2. Upload `dist/index.html.gz` as `highroller.html.gz` with the stock WebUI's flash file manager.
-3. Open `http://192.168.40.174/highroller.html` on a phone.
+3. Open `http://192.168.1.50/highroller.html` on a phone.
 
 Expected: same behaviour as Step 2. The stock WebUI at `/` is untouched.
 

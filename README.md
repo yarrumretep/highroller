@@ -18,7 +18,7 @@ The fake answers `curl -X POST localhost:8081/fake/touch` (tap the plate to the 
 ## Develop against the real board
 
 ```bash
-VITE_FLUIDNC_HOST=192.168.40.174 npm run dev
+VITE_FLUIDNC_HOST=192.168.1.50 npm run dev   # your board's address
 ```
 
 Then open `http://<this computer>:5173` on the phone. The app talks to the board's websocket directly; file requests go through Vite's proxy to the same host.
@@ -26,7 +26,7 @@ Then open `http://<this computer>:5173` on the phone. The app talks to the board
 ## Put it on the board
 
 ```bash
-npm run build     # dist/index.html.gz, about 55 KB
+npm run build     # dist/index.html.gz, about 63 KB
 ```
 
 Upload `dist/index.html.gz` to the board's flash through the stock WebUI (the FluidNC file manager), first under another name such as `highroller.html.gz` and open `http://fluidnc.local/highroller.html`; once you trust it, upload it as `index.html.gz` to replace the stock WebUI (keep a copy of the stock file first).
@@ -37,3 +37,7 @@ Upload `dist/index.html.gz` to the board's flash through the stock WebUI (the Fl
 - `src/lib/*.svelte.js` hold the app state (machine, job, settings); components live in `src/components`.
 - `dev/fake-fluidnc.js` models the parts of FluidNC 3.9.9 the app relies on, and the tests run against it.
 - `docs/superpowers/specs` holds the design; `docs/superpowers/plans` the build plans; `TODO.md` what is deferred past 1.0.
+
+## License
+
+[MIT](LICENSE).

@@ -6,7 +6,7 @@ Router unplugged (spindle off) for everything up to the air-cut; a hand near the
 
 1. **Back up the config.** Download `config.yaml` with the stock WebUI and keep it on the laptop. Note whether every axis has `homing/positive_direction` set, and whether `must_home` and `soft_limits` are on (the stock LowRider config leaves both off: nothing refuses a machine-coordinate move before homing, so home first; the app only notes which axes it has not seen homed since it connected).
 2. **Have ready:** a V-bit, four strips of masking tape, the touch plate and its clip, calipers or a tape measure, the measured plate thickness (V1's is 0.5 mm) and tape thickness (about 0.1 mm).
-3. **Install.** `npm run build`, upload `dist/index.html.gz` with the stock WebUI's file manager as `highroller.html.gz`, open `http://fluidnc.local/highroller.html`. (Or run `VITE_FLUIDNC_HOST=192.168.40.174 npm run dev` and open the laptop's address on the phone.)
+3. **Install.** `npm run build`, upload `dist/index.html.gz` with the stock WebUI's file manager as `highroller.html.gz`, open `http://fluidnc.local/highroller.html`. (Or run `VITE_FLUIDNC_HOST=192.168.1.50 npm run dev` and open the laptop's address on the phone.)
 
 ## Connection and reading the board
 
