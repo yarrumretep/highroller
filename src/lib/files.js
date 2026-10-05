@@ -5,6 +5,15 @@
 // FluidNC puts the outcome in `status`: "Ok", "<name> deleted"/"created"/"renamed to …", or an error such as "Upload failed".
 const succeeded = s => s === 'Ok' || / (deleted|created)$/.test(s) || / renamed to /.test(s)
 
+// FluidNC handles one upload at a time: a second one that starts while the first is still going makes it drop
+// the first's file half-written. Every upload the app makes, to the SD card or the flash, queues here.
+let chain = Promise.resolve()
+export function serial(fn) {
+  const p = chain.then(fn)
+  chain = p.catch(() => {}) // a failure must not block the ones after it
+  return p
+}
+
 export function parseList(json) {
   if (!Array.isArray(json.files) || !succeeded(json.status ?? 'Ok')) throw new Error(json.status || 'No file list')
   return json.files.map(f => ({ name: f.name, size: Number(f.size), dir: Number(f.size) < 0 }))
@@ -28,7 +37,7 @@ export function sdFiles(base = '') {
     download: async path => (await get(`/sd/${path.split('/').map(q).join('/')}`)).text(),
     // XHR rather than fetch, because only XHR reports upload progress
     upload: (file, dir = '', onProgress = () => {}) =>
-      new Promise((resolve, reject) => {
+      serial(() => new Promise((resolve, reject) => {
         const path = dirPath(dir, file.name)
         const form = new FormData()
         form.append(path + 'S', String(file.size)) // before the file: FluidNC reads it when the upload starts
@@ -46,6 +55,6 @@ export function sdFiles(base = '') {
         }
         xhr.onerror = () => reject(new Error('Upload failed: network error'))
         xhr.send(form)
-      }),
+      })),
   }
 }

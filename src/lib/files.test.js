@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseList, sdFiles } from './files.js'
+import { parseList, sdFiles, serial } from './files.js'
 import { start } from '../../dev/fake-fluidnc.js'
 
 test('parseList reads FluidNC listings and marks folders', () => {
@@ -38,4 +38,15 @@ test('folders: list, upload into, download from and delete in a folder on the fa
   } finally {
     server.close()
   }
+})
+
+test('uploads run one at a time, in order, and one that fails does not hold up the next', async () => {
+  const order = []
+  const a = serial(() => new Promise(r => setTimeout(() => { order.push('a'); r('a') }, 30)))
+  const b = serial(async () => { order.push('b'); throw new Error('nope') })
+  const c = serial(async () => { order.push('c'); return 'c' })
+  assert.equal(await a, 'a')
+  await assert.rejects(b, /nope/)
+  assert.equal(await c, 'c')
+  assert.deepEqual(order, ['a', 'b', 'c'])
 })
