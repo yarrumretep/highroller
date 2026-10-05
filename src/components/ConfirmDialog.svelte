@@ -14,8 +14,8 @@
     <div class="box">
       <h2>{pending.req.title}</h2>
       {#if pending.req.text}<p>{pending.req.text}</p>{/if}
-      <div class="actions">
-        <button onclick={() => settle(false)}>Cancel</button>
+      <div class="actions" class:one={pending.req.notice}>
+        {#if !pending.req.notice}<button onclick={() => settle(false)}>Cancel</button>{/if}
         <button class:danger={pending.req.danger} class:go={!pending.req.danger} onclick={() => settle(true)}>{pending.req.ok}</button>
       </div>
     </div>
@@ -29,6 +29,7 @@
   h2 { margin: 0; font-size: 18px; }
   p { margin: 0; font-size: 15px; line-height: 1.4; color: var(--muted); }
   .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .actions.one { grid-template-columns: 1fr; }
   .actions button { min-height: 48px; font-weight: 700; }
   .go { color: white; background: var(--ok); border-color: var(--ok); }
   .danger { color: white; background: var(--bad); border-color: var(--bad); }

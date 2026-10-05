@@ -68,6 +68,13 @@ export function wifiPercent(lines) {
   return m ? Number(m[1]) : null
 }
 
+// The firmware's own name and version from the same stats ({"id":"FW version","value":"FluidNC v3.9.9 (…)"}), or null.
+export function fwVersion(lines) {
+  const json = lines.map(l => /^\[MSG:JSON:(.*)\]$/.exec(l)?.[1] ?? l).join('')
+  const m = /"id"\s*:\s*"FW version"\s*,\s*"value"\s*:\s*"([^"]+)"/.exec(json) || lines.map(l => /^FW version:\s*(.+)$/.exec(l)).find(Boolean)
+  return m ? m[1].trim() : null
+}
+
 // Plain-language reasons for FluidNC ALARM:n codes (names from FluidNC Protocol.cpp).
 export const ALARMS = {
   1: 'A limit switch was hit while moving. Position may be off, so home again.',

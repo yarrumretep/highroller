@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseStatus, EMPTY, wifiPercent } from './status.js'
+import { parseStatus, EMPTY, wifiPercent, fwVersion } from './status.js'
 
 test('parses state, machine position, work offset and work position', () => {
   const s = parseStatus('<Idle|MPos:10.000,20.000,-5.000|FS:0,0|WCO:1.000,2.000,-3.000>')
@@ -100,4 +100,12 @@ test('wifiPercent reads the Signal entry of the JSON stats, split across [MSG:JS
   // the plain 3.9.9 output has no signal; an older plain "Signal:" line still reads
   assert.equal(wifiPercent(['Chip ID: 36942', '[MSG:Mode=STA:SSID=shop:Status=Connected:IP=1.2.3.4:MAC=00]', 'FW version: FluidNC v3.9.9']), null)
   assert.equal(wifiPercent(['Current WiFi Mode: STA', 'Signal: 78%']), 78)
+})
+
+test('fwVersion reads the FW version entry of the JSON stats, or a plain line, and is null without one', () => {
+  const json = '{"cmd":"420","status":"ok","data":[{"id":"Chip ID","value":"36942"},{"id":"FW version","value":"FluidNC v3.9.9 (main-abc1234)"},{"id":"Signal","value":"78%"}]}'
+  assert.equal(fwVersion([json.slice(0, 60), json.slice(60)]), 'FluidNC v3.9.9 (main-abc1234)')
+  assert.equal(fwVersion([`[MSG:JSON:${json.slice(0, 90)}]`, `[MSG:JSON:${json.slice(90)}]`]), 'FluidNC v3.9.9 (main-abc1234)')
+  assert.equal(fwVersion(['Chip ID: 36942', 'FW version: FluidNC v3.9.9']), 'FluidNC v3.9.9')
+  assert.equal(fwVersion(['Chip ID: 36942']), null)
 })
