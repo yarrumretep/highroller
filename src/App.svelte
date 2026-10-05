@@ -15,6 +15,7 @@
   import { flatnessProbe } from './lib/flatnessProbe.js'
   import { flatness } from './lib/flatness.svelte.js'
   import { unhomedNote } from './lib/homing.js'
+  import { confirm } from './lib/confirm.svelte.js'
 
   const TABS = [['jog', 'Jog'], ['job', 'Job'], ['tools', 'Tools'], ['more', 'More']]
   let tab = $state('jog')
@@ -22,6 +23,16 @@
   // mid-run must not hide the dialog behind a `display: none` tab while the page stays inert.
   let calibrating = $state(false)
   let flattening = $state(false)
+
+  // A job that ran to its own end gets a notice (the machine just stops otherwise), with a buzz on a phone.
+  const clock = ms => { const s = Math.round(ms / 1000); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h} h ${m} min` : m ? `${m} min ${s % 60} s` : `${s} s` }
+  $effect(() => {
+    const f = job.finished
+    if (!f) return
+    job.finished = null
+    navigator.vibrate?.([200, 100, 200])
+    confirm({ title: 'Job finished', text: `${f.name} ran to the end${f.ms ? ` in ${clock(f.ms)}` : ''}.`, ok: 'OK', notice: true })
+  })
 
   // Tap-to-go is a machine-coordinate move: raise clear of the stock first, same rule as Dro's Go to XY0.
   async function goTo(x, y) {
