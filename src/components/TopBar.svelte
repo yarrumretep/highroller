@@ -12,6 +12,7 @@
     : ''
   )
   let showSettings = $state(false)
+  const appVersion = __APP_VERSION__ // package.json's, put in by the build
   const fwShort = $derived(/v[\d.]+/.exec(machine.fw ?? '')?.[0] ?? machine.fw) // "v4.1.1" for a phone's width
   // A blank, invalid or negative plate thickness keeps the previous value rather than becoming 0 (or negative).
   function plate(e) {
@@ -82,6 +83,7 @@
   <Sheet title="Settings" onclose={() => (showSettings = false)}>
     <label>Touch plate thickness <input type="number" min="0" step="0.01" value={settings.plateMm} onchange={plate} /> mm</label>
     <p class="muted">V1 Engineering's plate is 0.5 mm. Everything else is asked by the operation that needs it.</p>
+    <p class="muted">HighRoller v{appVersion}</p>
   </Sheet>
 {/if}
 
