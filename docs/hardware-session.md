@@ -6,7 +6,7 @@ Router unplugged (spindle off) for everything up to the air-cut; a hand near the
 
 1. **Back up the config.** Download `config.yaml` with the stock WebUI and keep it on the laptop. Note whether every axis has `homing/positive_direction` set, and whether `must_home` and `soft_limits` are on (the stock LowRider config leaves both off: nothing refuses a machine-coordinate move before homing, so home first; the app only notes which axes it has not seen homed since it connected).
 2. **Have ready:** a V-bit, four strips of masking tape, the touch plate and its clip, calipers or a tape measure, the measured plate thickness (V1's is 0.5 mm).
-3. **Install.** `npm run build`, upload `dist/index.html.gz` with the stock WebUI's file manager as `highroller.html.gz`, open `http://fluidnc.local/highroller.html`. (Or run `VITE_FLUIDNC_HOST=192.168.1.50 npm run dev` and open the laptop's address on the phone.)
+3. **Install.** `npm run build`, upload `dist/index.html.gz` with the stock WebUI's file manager as `highroller.html.gz`, open `http://fluidnc.local/highroller.html`. Mind the room: the Jackpot's flash filesystem is 192 KB and the stock `index.html.gz` is 109 KB, so with HighRoller's 64 KB beside it only a few KB are left for `config.yaml`, its `.bak` and `highroller.json`, and a write into a full flash leaves a cut-off file. Run `$LocalFS/List` after the upload (its last line gives Free, Used and Total) and keep at least 30 KB free; once HighRoller is trusted, upload it as `index.html.gz` and delete `highroller.html.gz`. (Or run `VITE_FLUIDNC_HOST=192.168.1.50 npm run dev` and open the laptop's address on the phone.)
 
 ## Connection and reading the board
 
@@ -66,3 +66,12 @@ $H
 ```
 
 (Y also has two motors; X has one. `$/axes/z/motor0/hard_limits` alone, without `=`, shows the current value.)
+
+## If the flash fills up
+
+Symptoms: the console says `Settings not read: highroller.json is corrupt (Unexpected end of JSON input)`; `$X` answers `error:152` and `[MSG:ERR: Configuration is invalid. Check boot messages for ERR's.]`; `[MSG:Files changed]` appears at every attempt to write. A write into a full flash creates the file and then fails, leaving it empty or cut off; an empty `config.yaml` puts the board in ConfigAlarm at the next boot.
+
+1. `$LocalFS/List`: the sizes, and Free at the end. `$LocalFS/Show=config.yaml` shows whether the config is whole.
+2. Free space: `$LocalFS/Delete=highroller.html.gz` (or the stock `index.html.gz`, if HighRoller is to be the WebUI). The commands work in ConfigAlarm.
+3. Put a good config back: upload the laptop's backup as `config.yaml` (the stock WebUI's file manager, or `curl -F "myfile=@config.yaml;filename=config.yaml" http://fluidnc.local/files`), then `$Bye`. If the backup is older than the last calibration, run the pass again. `$Config/Filename=config.yaml.bak` followed by `$Bye` boots from the `.bak` on the board instead, without a laptop.
+4. Reload the page: a `highroller.json` that cannot be read is rewritten from the device's copy; a calibration pass refuses to write when the flash is short of room, with the numbers.

@@ -19,6 +19,23 @@ export async function listFlash(base = '') {
   return parseList(await r.json())
 }
 
+// "180.00 KB", "1.00 GB", "512 B" → bytes, as FluidNC formats sizes in its /files listing
+export function parseBytes(s) {
+  const m = /^\s*([\d.]+)\s*([KMG]?)B?\s*$/i.exec(String(s))
+  if (!m) return NaN
+  return Number(m[1]) * { '': 1, K: 1024, M: 1024 ** 2, G: 1024 ** 3 }[m[2].toUpperCase()]
+}
+
+// The flash filesystem's size: { total, used, free } in bytes. The Jackpot's is only 192 KB, and a write
+// into a full one leaves a cut-off file (an empty config.yaml puts the board in ConfigAlarm).
+export async function flashSpace(base = '') {
+  const r = await fetch(base + '/files?path=/', { cache: 'no-store' }).catch(() => { throw new Error("Can't list the flash: network error") })
+  if (!r.ok) throw new Error(`Can't list the flash: HTTP ${r.status}`)
+  const json = await r.json()
+  const total = parseBytes(json.total), used = parseBytes(json.used)
+  return { total, used, free: total - used }
+}
+
 export async function writeFlash(name, text, base = '') {
   const path = '/' + name
   const blob = new Blob([text])

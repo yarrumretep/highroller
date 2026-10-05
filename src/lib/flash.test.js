@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFlash, writeFlash, listFlash } from './flash.js'
+import { readFlash, writeFlash, listFlash, flashSpace, parseBytes } from './flash.js'
 import { FluidNC } from './fluidnc.js'
 import { start } from '../../dev/fake-fluidnc.js'
 
@@ -28,5 +28,21 @@ test('writes a flash file and reads it back byte for byte over HTTP; refuses whi
   } finally {
     fnc.close()
     server.close()
+  }
+})
+
+test('parseBytes reads the sizes FluidNC formats, and flashSpace turns a listing into bytes', async () => {
+  assert.equal(parseBytes('512 B'), 512)
+  assert.equal(parseBytes('180.00 KB'), 184320)
+  assert.equal(parseBytes('1.50 MB'), 1572864)
+  assert.equal(parseBytes('1.00 GB'), 1073741824)
+  assert.ok(Number.isNaN(parseBytes('lots')))
+  const server = start(8094)
+  try {
+    const s = await flashSpace('http://localhost:8094')
+    assert.equal(s.total, 1073741824)
+    assert.equal(s.free, s.total - s.used)
+  } finally {
+    await server.close()
   }
 })

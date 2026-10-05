@@ -33,7 +33,7 @@ Then open `http://<this computer>:5173` on the phone. The app talks to the board
 npm run build     # dist/index.html.gz, about 64 KB
 ```
 
-Upload `dist/index.html.gz` to the board's flash through the stock WebUI (the FluidNC file manager), first under another name such as `highroller.html.gz` and open `http://fluidnc.local/highroller.html`; once you trust it, upload it as `index.html.gz` to replace the stock WebUI (keep a copy of the stock file first).
+Upload `dist/index.html.gz` to the board's flash through the stock WebUI (the FluidNC file manager), first under another name such as `highroller.html.gz` and open `http://fluidnc.local/highroller.html`; once you trust it, upload it as `index.html.gz` to replace the stock WebUI (keep a copy of the stock file first). The board's flash filesystem is only 192 KB on a Jackpot and the stock WebUI takes 109 KB of it, so do not leave both there for long: a write into a full flash leaves a cut-off file. `$LocalFS/List` shows the room left.
 
 ## Layout
 

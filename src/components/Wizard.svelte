@@ -9,7 +9,7 @@
   import { machine, fnc, send as sendLine, stop, reloadConfig } from '../lib/machine.svelte.js'
   import { settings, loadSettings } from '../lib/settings.svelte.js'
   import { probeZ } from '../lib/probe.js'
-  import { readFlash, writeFlash, listFlash } from '../lib/flash.js'
+  import { readFlash, writeFlash, listFlash, flashSpace } from '../lib/flash.js'
   import { badEdit } from '../lib/calibration.js'
   import JogPad from './JogPad.svelte'
   import FlatnessReport from './FlatnessReport.svelte'
@@ -107,6 +107,13 @@
       if (current !== old) throw new Error('The config changed since this pass started, so nothing was written. Run the pass again.')
       const bad = badEdit(old, text)
       if (bad) throw new Error(`The edited config doesn't look right (${bad}), so nothing was written.`)
+      // A full flash leaves a cut-off config, which puts the board in ConfigAlarm: refuse before touching anything.
+      // Both files may be written, in 4 KB blocks, so ask for a couple of blocks of slack on top.
+      const space = await flashSpace()
+      checkStopped()
+      const kb = b => `${Math.round(b / 1024)} KB`
+      const need = text.length + (backedUp ? 0 : old.length) + 8192
+      if (space.free < need) throw new Error(`The board's flash has ${kb(space.free)} free of ${kb(space.total)}, and this pass needs about ${kb(need)} for ${name}${backedUp ? '' : ' and its .bak'}. Nothing was written. $LocalFS/List shows what is there; $LocalFS/Delete=<name> frees space (the stock index.html.gz once HighRoller is the WebUI, or an old upload). Then run the pass again.`)
       // One backup, of the config as it was before the first calibration: an existing .bak is kept.
       if (!backedUp) {
         if (!(await listFlash()).some(f => f.name === `${name}.bak`)) await writeFlash(`${name}.bak`, old)

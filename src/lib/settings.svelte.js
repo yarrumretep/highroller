@@ -52,11 +52,13 @@ async function loadFromBoard() {
     try {
       board = JSON.parse(text)
     } catch (e) {
-      throw new Error(`${FILE} is corrupt (${e.message}); fix or delete it with the stock WebUI`)
+      // A cut-off write (the phone slept mid-upload, or the flash was full) leaves a file that holds nothing
+      // worth keeping: this device's copy goes back in its place, as on a first run.
+      log(`${FILE} on the board is unreadable (${e.message}); this device's settings are written back`)
     }
   } catch (e) {
     if (e.status !== 404) {
-      // busy, unreachable or corrupt: nothing is written over a copy that couldn't be read
+      // busy or unreachable: nothing is written over a copy that couldn't be read
       log(`Settings not read: ${e.message}`)
       if (e.status) setTimeout(() => runWhenIdle(retry), RETRY_MS) // the board answered but refused: it was busy
       return false
@@ -92,10 +94,10 @@ function writeBack() {
   if (!onBoard || json === boardJson) return // the link dropped (the board's copy is read again), or nothing to write
   const s = machine.status
   if (!(s.state === 'Idle' || s.state === 'Alarm') || s.sd) return runWhenIdle(writeBack)
-  // ponytail: a failed write is not retried on its own; it goes out again only if another setting changes afterward.
+  // A failed write stops the writes until the next connection: each attempt into a full flash cuts the file off again.
   saveSettings()
     .then(() => { boardJson = json })
-    .catch(e => console.warn('Settings not saved:', e.message))
+    .catch(e => { onBoard = false; log(`Settings not saved: ${e.message}. Is the flash full? $LocalFS/List shows it. Nothing more is written until the next connection.`) })
 }
 
 $effect.root(() => {
