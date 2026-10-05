@@ -69,7 +69,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 **Status reports**
 - The app turns on auto-reporting with `$RI=100`, which gives 10 reports a second.
 - FluidNC only auto-reports while the machine moves or when something changes. So whenever nothing has arrived for 250 ms, the app sends `?`.
-- If nothing at all arrives for 3 s, the app treats the link as dead and reconnects. That also covers a phone waking from sleep.
+- If a `?` goes unanswered for 3 s, the app treats the link as dead and reconnects. That also covers a phone waking from sleep. Measured from the ask, not from the last reply: a background tab's timers run once a second, later once a minute, so a quiet minute between ticks is not a dead link (amended 2026-10-05; before that a hidden desktop tab reconnected over and over, forgetting the homed state each time).
 - Fields parsed: `State` (including `Hold:0`/`Hold:1`), `SD` (`<percent>,<path>` while FluidNC is reading the file; the field disappears once the whole file has been read, while the last moves are still cutting, so the app keeps following a running job until the state returns to Idle), `MPos` or `WPos` (depending on FluidNC's `$10` setting), `WCO`, `FS`, `Ov`, `Pn`, `A`.
 - `WCO` (work offset) and `Ov` (overrides) only appear in some reports, so their last values are cached. `A` (spindle and coolant state) only appears alongside `Ov`.
 - Work position: WPos = MPos − WCO. If the report gives WPos instead, MPos = WPos + WCO.

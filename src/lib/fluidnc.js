@@ -84,6 +84,7 @@ export class FluidNC {
       this.opened = true
       this.retryMs = 500
       this.lastRx = Date.now()
+      this.askedAt = 0 // when the last '?' went out unanswered
       this.onConnection('open')
       this.timer = setInterval(() => this._watch(), 250)
       this.send('$RI=100')
@@ -92,10 +93,18 @@ export class FluidNC {
     ws.onclose = () => this._closed()
   }
 
+  // A '?' that has gone unanswered for 3 s is a dead link (a phone that slept): start over. Measured from the ask,
+  // not from the last reply: a background tab's timers run once a second, later once a minute, and a quiet minute
+  // between ticks is not a dead link. While idle, FluidNC only reports when asked, so a new '?' goes out once the
+  // last one has been answered and 200 ms have passed.
   _watch() {
-    const quiet = Date.now() - this.lastRx
-    if (quiet > 3000) this._drop() // dead link, e.g. a phone that slept: start over
-    else if (quiet >= 200) this.realtime(0x3f) // '?': FluidNC only auto-reports while moving
+    const now = Date.now()
+    const unanswered = this.askedAt > this.lastRx
+    if (unanswered && now - this.askedAt > 3000) return this._drop()
+    if (!unanswered && now - this.lastRx >= 200) {
+      this.realtime(0x3f)
+      this.askedAt = now
+    }
   }
 
   _drop() {

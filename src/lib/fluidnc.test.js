@@ -219,3 +219,20 @@ test('a noReply command is sent in its turn, settled at once, and holds nothing 
   ws().rx('[MSG:INFO: Disabled]\nok\n') // the ok answers $X; the stray Disabled lands in its output, as any unowned line does
   assert.deepEqual(await c, { ok: true, error: null, lines: ['[MSG:INFO: Disabled]'] })
 })
+
+test('a throttled background tab is not a dead link: a quiet minute with the last ? answered keeps the socket', t => {
+  const { fnc, ws } = setup(t)
+  ws().open()
+  const first = ws()
+  advance(t, 500) // a ? went out
+  assert.ok(first.sent.includes('?'))
+  first.rx('<Idle|MPos:0,0,0|FS:0,0>\n') // and was answered
+  const sentBefore = first.sent.length
+  t.mock.timers.setTime(Date.now() + 60000) // the tab was hidden: no ticks for a minute
+  fnc._watch() // the first tick after
+  assert.equal(first.readyState, 1, 'still open')
+  assert.equal(first.sent.length, sentBefore + 1, 'a fresh ? went out')
+  t.mock.timers.setTime(Date.now() + 4000) // that one never answered
+  fnc._watch()
+  assert.equal(first.readyState, 3, 'now it is dead')
+})
