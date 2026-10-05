@@ -300,3 +300,45 @@ test('SD: disappears once the file has been read, while the last moves still run
     server.close()
   }
 })
+
+test('check mode: $C parses a file without moving, reports a bad line or a move past the travel, and $C again resets', async () => {
+  const server = start(8095)
+  const lines = []
+  const fnc = new FluidNC({ host: 'localhost:8095', onLine: l => lines.push(l) })
+  const opened = new Promise(r => { fnc.onConnection = c => c === 'open' && r() })
+  fnc.connect()
+  await opened
+  try {
+    assert.equal((await fnc.send('$X')).ok, true)
+    await upload(8095, 'good.nc', 'G21 G90\nG0 X10 Y10\nG1 X20 F1000\nM2\n')
+    await upload(8095, 'bad.nc', 'G21 G90\nG0 X10\nG99 X5\nG1 X20 F1000\n')
+    await upload(8095, 'far.nc', 'G21 G90\nG0 X10\nG0 X5000\n')
+    assert.equal((await fnc.send('$C')).ok, true)
+    await sleep(80)
+    assert.equal(fnc.status.state, 'Check')
+    assert.equal((await fnc.send('$SD/Run=/good.nc')).ok, true)
+    await sleep(400)
+    assert.equal(fnc.status.state, 'Check')
+    assert.ok(!fnc.status.sd, 'the file has been read')
+    assert.deepEqual(fnc.status.mpos, [0, 0, 0]) // nothing moved
+    assert.equal((await fnc.send('$SD/Run=/bad.nc')).ok, true)
+    await sleep(400)
+    assert.ok(lines.includes('[MSG:ERR: 20 (Unsupported command) in /sd/bad.nc at line 3]'), lines.join('|'))
+    assert.equal(fnc.status.state, 'Check')
+    assert.equal((await fnc.send('$SD/Run=/far.nc')).ok, true)
+    await sleep(400)
+    assert.ok(lines.some(l => l.startsWith('[MSG:INFO: Soft limit exceeded on X axis: target 5000 mm')), lines.join('|'))
+    assert.ok(lines.includes('ALARM:2'))
+    assert.equal(fnc.status.state, 'Alarm')
+    assert.equal((await fnc.send('$X')).ok, true)
+    assert.equal((await fnc.send('$C')).ok, true)
+    await sleep(80)
+    assert.equal(fnc.status.state, 'Check')
+    assert.equal((await fnc.send('$C')).ok, true)
+    await sleep(80)
+    assert.equal(fnc.status.state, 'Idle')
+  } finally {
+    fnc.close()
+    server.close()
+  }
+})

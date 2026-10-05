@@ -80,6 +80,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 
 **HTTP**
 - SD card: list, upload (with a progress bar), download, delete.
+- SD card, a whole folder (desktop browsers only; phones have no folder picker, added 2026-10-05): the folder's tree is recreated under the current folder, folders first, then every file goes up in turn through the one-at-a-time upload queue; hidden files such as `.DS_Store` stay behind. Files already on the card are replaced only after one question naming them.
 - Flash: read and upload, used for the config file, `highroller.json` and app updates.
 - **One file API for both versions.** FluidNC 3.x and 4.x both serve the same endpoints, so the app uses one implementation (checked in source; 4.x adds WebDAV alongside but keeps these):
   - list: `GET /upload?path=/`, which returns JSON (`files: [{name, size}]`, with size −1 for a folder);
@@ -99,7 +100,7 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 **Always visible**
 - Connection badge, with the controller's Wi-Fi signal strength next to it (from `$System/Stats`, polled every 15 s; hidden in access-point mode).
 - Machine state.
-- Large STOP button, with a gear button beside it that opens the Settings sheet (the touch plate thickness, the only setting shown), and the dice logo at the left of the bar. On a phone the bar drops the word beside the connection dot and the Wi-Fi percentage (amended 2026-10-04).
+- Large STOP button, with a gear button beside it that opens the Settings sheet (the touch plate thickness, the only setting shown, and the controller's firmware name and version from its `$System/Stats`, which the state pill also shows on hover), and the dice logo at the left of the bar. On a phone the bar drops the word beside the connection dot and the Wi-Fi percentage (amended 2026-10-04).
 - An alarm banner when needed, with the reason in plain language and Home / Unlock buttons.
 
 **Layouts**
@@ -149,6 +150,10 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 - **Remaining time:**
   1. Estimate each remaining segment's time from the G-code: length ÷ feed rate, with rapids at the axes' maximum rate from the config.
   2. Scale that estimate by how fast the job is really going: actual elapsed time ÷ estimated elapsed time so far.
+
+**Check** (added 2026-10-05): a button beside Run sends the open file through FluidNC's check mode: `$C`, then `$SD/Run`, with the state `Check` and the `SD:` progress shown as "Checking… N%". Every line goes through the controller's parser and the soft-limit check against the work zero as it is now, nothing moves, and the file is read as fast as the card gives it. The first bad line ends the run and is reported as "Line N: error 20, unsupported command" (from FluidNC's `[MSG:ERR: … at line N]`); a move past the travel comes back as the soft-limit message, with a note that the current work zero was used. A clean run reports "OK: N lines, nothing past the travel". Afterwards `$C` again leaves check mode (a reset), or `$X` when a soft limit left the machine in Alarm. The result stays beside the file until another file is opened. Check runs only on demand: the reset on exit and the time on a slow card make it a poor habit on every open. A check-mode run is not a job to the follower: no progress estimate, no "finished" notice.
+
+**When a job ends** on its own (the state goes to Idle with no STOP pressed since it began, and no alarm), a notice says so, with the file's name and how long it ran, and a phone buzzes. A job that a STOP or an alarm ended gets no notice: the banner already says what happened (added 2026-10-05).
 
 ## Preview and tracking
 

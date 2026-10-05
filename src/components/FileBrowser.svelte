@@ -1,12 +1,13 @@
 <script>
   import { onMount } from 'svelte'
   import { machine } from '../lib/machine.svelte.js'
-  import { job, refresh, load, upload, remove, mkdir, badName, sdUrl, noJob } from '../lib/job.svelte.js'
+  import { job, refresh, load, upload, uploadTree, remove, mkdir, badName, sdUrl, noJob } from '../lib/job.svelte.js'
   import { confirm as ask } from '../lib/confirm.svelte.js'
 
   let { onclose } = $props()
   let dialog
   let picker
+  let folderPicker
   let selected = $state(null) // entry in the current folder
   let newFolder = $state(null) // the name being typed, or null when the box is hidden
   const busy = $derived(machine.conn !== 'open' || !noJob() || job.upload !== null)
@@ -49,6 +50,14 @@
     selected = null // the just-uploaded files aren't the stale selection from before
     for (const file of files) await upload(file, job.dir) // one at a time: the card takes one upload, and each may ask before replacing
   }
+  // A whole folder (desktop browsers only: phones have no folder picker). Hidden files such as .DS_Store stay behind.
+  async function pickFolder(ev) {
+    const files = [...ev.currentTarget.files].filter(f => !/(^|\/)\./.test(f.webkitRelativePath))
+    ev.currentTarget.value = ''
+    if (!files.length) return
+    selected = null
+    await uploadTree(files, job.dir)
+  }
   async function create() {
     const name = newFolder.trim()
     if (!name) return
@@ -85,6 +94,8 @@
   <footer>
     <button disabled={busy} onclick={() => picker.click()}>Upload here</button>
     <input type="file" multiple accept=".nc,.gcode,.ngc,.tap,.cnc,.txt" hidden bind:this={picker} onchange={pick} />
+    <button class="desktop" disabled={busy} onclick={() => folderPicker.click()}>Upload folder</button>
+    <input type="file" webkitdirectory multiple hidden bind:this={folderPicker} onchange={pickFolder} />
     <button disabled={busy} onclick={() => (newFolder = newFolder === null ? '' : null)}>New folder</button>
     {#if selected && !selected.dir}<a class="button" href={sdUrl(pathOf(selected))} download={selected.name}>Download</a>{/if}
     <button disabled={busy || !selected} onclick={del}>Delete</button>
@@ -112,5 +123,9 @@
   .newfolder .go { margin-left: 0; }
   a.button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--btn); color: inherit; text-decoration: none; }
   footer { flex-wrap: wrap; }
-  @media (min-width: 1000px) { dialog { height: 80vh; max-height: 80vh; margin: 10vh auto; border-radius: 14px; } }
+  .desktop { display: none; }
+  @media (min-width: 1000px) {
+    dialog { height: 80vh; max-height: 80vh; margin: 10vh auto; border-radius: 14px; }
+    .desktop { display: inline-block; }
+  }
 </style>

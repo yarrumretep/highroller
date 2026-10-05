@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { machine } from '../lib/machine.svelte.js'
-  import { job, run, pause, resume, noJob, unload } from '../lib/job.svelte.js'
+  import { job, run, pause, resume, noJob, unload, checkFile } from '../lib/job.svelte.js'
   import { progress } from '../lib/track.js'
   import { confirm as ask } from '../lib/confirm.svelte.js'
   import FileBrowser from './FileBrowser.svelte'
@@ -42,9 +42,9 @@
     <div>
       <strong>{job.name || 'No file open'}</strong>
       {#if job.data}<span class="muted"> · about {clock(total)}</span>{/if}
-      {#if job.name && !running}<button class="close" aria-label="Close {job.name}" title="Close the file" onclick={unload}>✕</button>{/if}
+      {#if job.name && !running && !job.check.running}<button class="close" aria-label="Close {job.name}" title="Close the file" onclick={unload}>✕</button>{/if}
     </div>
-    <button disabled={machine.conn !== 'open' || !noJob()} onclick={() => (browsing = true)}>Open…</button>
+    <button disabled={machine.conn !== 'open' || !noJob() || job.check.running} onclick={() => (browsing = true)}>Open…</button>
   </div>
   {#if browsing}<FileBrowser onclose={() => (browsing = false)} />{/if}
 
@@ -63,9 +63,15 @@
     {:else if s.state === 'Run'}
       <button disabled={machine.stopping} onclick={pause}>Pause</button>
     {:else}
-      <button class="go" disabled={!idle || !job.data || running || job.starting || job.upload !== null} onclick={async () => (await ask({ title: `Run ${job.name}?`, text: 'Check the bit, the work zero, and that the area is clear.', ok: 'Run' })) && run()}>Run</button>
+      <div class="runcheck">
+        <button class="go" disabled={!idle || !job.data || running || job.starting || job.upload !== null || job.check.running} onclick={async () => (await ask({ title: `Run ${job.name}?`, text: 'Check the bit, the work zero, and that the area is clear.', ok: 'Run' })) && run()}>Run</button>
+        <!-- Check mode: every line through the controller's parser and soft limits with the work zero as it is now, nothing moved -->
+        <button disabled={!idle || !job.data || running || job.starting || job.upload !== null || job.check.running} title="Run the file through the controller without moving: bad lines and moves past the travel are reported" onclick={checkFile}>Check</button>
+      </div>
     {/if}
   </div>
+  {#if job.check.running}<p class="muted">Checking… {Math.round(job.check.percent)}%</p>
+  {:else if job.check.result}<p class:ok={job.check.result.ok} class:err={!job.check.result.ok}>{job.check.result.ok ? '✓' : '✗'} {job.check.result.text}</p>{/if}
 
   {#if job.busy}<p class="muted">{job.busy}</p>{/if}
   {#if job.error}<p class="err">{job.error}</p>{/if}
@@ -81,5 +87,8 @@
   .times { display: flex; justify-content: space-between; font-size: 14px; }
   .controls { display: grid; }
   .controls button { min-height: 56px; font-size: 18px; font-weight: 700; }
+  .runcheck { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  .runcheck button:last-child { font-weight: 600; font-size: 16px; }
   .go { color: white; background: var(--ok); border-color: var(--ok); }
+  .ok { margin: 0; color: var(--ok); }
 </style>

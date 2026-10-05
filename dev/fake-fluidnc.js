@@ -17,6 +17,10 @@ const AXES = 'XYZ'
 const MAX_RATE = { X: 9000, Y: 9000, Z: 900 } // mm/min, stock LowRider Jackpot config
 const HOME_MS = 1500
 const PLANNER_BLOCKS = 16 // moves a job's file is read ahead of the motion (FluidNC's default planner_blocks)
+// The travel check mode enforces, from where the fake homes (0) and CONFIG_YAML's max_travel: the fake checks it
+// whatever soft_limits says, so the UI's check path can be tested. Z homes at the top.
+const RANGE = [[0, 1220], [0, 2440], [-300, 0]]
+const KNOWN_G = [0, 1, 2, 3, 4, 10, 17, 18, 19, 20, 21, 28, 30, 38.2, 53, 54, 55, 56, 57, 58, 59, 90, 91, 92, 93, 94]
 const REFRESH = 10 // like FluidNC, WCO and Ov come in every 10th report (and in the next one after a change)
 // Just enough of the stock LowRider config for the app's readers and editors (axes, probe, outputs).
 const CONFIG_YAML = `board: Jackpot TMC2209
@@ -174,6 +178,30 @@ export function start(port = 8081) {
     if (!skip && w.some(([k]) => AXES.includes(k))) motion(l, false, () => {})
   }
 
+  // One line of a job in check mode: an unknown G-code is error 20 at that line and a move past the travel is a
+  // soft limit (ALARM:2); either ends the job. Nothing moves. Returns true when the job ended.
+  let checkPos = [0, 0, 0]
+  function checkLine(text, n, name) {
+    const l = text.replace(/\([^)]*\)|;.*$/g, '').trim().toUpperCase()
+    const w = words(l)
+    if (w.some(([k, v]) => k === 'G' && !KNOWN_G.includes(v))) { broadcast(`[MSG:ERR: 20 (Unsupported command) in /sd/${name} at line ${n}]`); return true }
+    for (const [k, v] of w) if (k === 'G' && (v === 90 || v === 91)) m.absolute = v === 90
+    if (w.some(([k, v]) => k === 'G' && [10, 28, 30, 53, 92].includes(v)) || !w.some(([k]) => AXES.includes(k))) return false
+    const target = [...checkPos]
+    for (const [k, v] of w) if (AXES.includes(k)) { const i = AXES.indexOf(k); target[i] = m.absolute ? v + m.wco[i] : checkPos[i] + v }
+    for (let i = 0; i < 3; i++) {
+      if (target[i] < RANGE[i][0] || target[i] > RANGE[i][1]) {
+        broadcast(`[MSG:INFO: Soft limit exceeded on ${AXES[i]} axis: target ${target[i]} mm, limit [${RANGE[i][0]}, ${RANGE[i][1]}] mm]`)
+        broadcast('ALARM:2')
+        m.state = 'Alarm'
+        status()
+        return true
+      }
+    }
+    checkPos = target
+    return false
+  }
+
   function line(text, ws) {
     const reply = t => send(ws, t)
     const ok = () => reply('ok')
@@ -232,6 +260,11 @@ export function start(port = 8081) {
       status(ws)
       broadcast(`[MSG:INFO: auto report interval set to ${ri}]`)
       return ok()
+    }
+    if (l === '$C') { // check mode: the parser and the travel, no motion; leaving it is a reset
+      if (m.state === 'Check') { m.state = 'Idle'; m.moves = []; job = null; status(); reply('[MSG:INFO: Disabled]'); return ok() }
+      if (m.state !== 'Idle') return reply('error:8')
+      m.state = 'Check'; checkPos = [...m.mpos]; status(); reply('[MSG:INFO: Enabled]'); return ok()
     }
     if (l === '$X') { // unlocks only an alarm; otherwise just ok, as FluidNC does
       if (m.state === 'Alarm') { m.state = 'Idle'; status(); reply('[MSG:INFO: Caution: Unlocked]') }
@@ -328,9 +361,15 @@ export function start(port = 8081) {
       job.pos += Buffer.byteLength(text) + 1
       jobLine(text)
     }
+    // Check mode: the file is parsed as fast as it is read, a few lines a tick so the progress shows; nothing moves
+    for (let n = 0; job && m.state === 'Check' && n < 40 && job.i < job.lines.length; n++) {
+      const text = job.lines[job.i++]
+      job.pos += Buffer.byteLength(text) + 1
+      if (checkLine(text, job.i, job.name)) { job = null; break }
+    }
     if (job && job.i >= job.lines.length) {
       job = null // the whole file has been read: SD: goes now, while the last moves are still being cut
-      if (!m.moves.length) m.state = 'Idle' // a file without moves
+      if (!m.moves.length && m.state !== 'Check') m.state = 'Idle' // a file without moves
       status()
     }
     while (!job && pendingLines.length) line(...pendingLines.shift()) // in order, until one starts another job
@@ -363,7 +402,7 @@ export function start(port = 8081) {
       if (!m.moves.length && !job) { m.state = 'Idle'; status() }
     }
     if (!m.moves.length) while (waiters.length) waiters.shift()()
-    if (ri && (m.state === 'Run' || m.state === 'Jog' || m.state === 'Home') && Date.now() - lastReport >= ri) status()
+    if (ri && (m.state === 'Run' || m.state === 'Jog' || m.state === 'Home' || (m.state === 'Check' && job)) && Date.now() - lastReport >= ri) status()
   }, TICK)
 
   const json = (res, body) => {

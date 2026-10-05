@@ -11,7 +11,7 @@ Router unplugged (spindle off) for everything up to the air-cut; a hand near the
 ## Connection and reading the board
 
 4. **Connect.** Pass: "Connected", the Wi-Fi bars, work coordinates within about a second (no `–.---`), the Tools tab's Calibrate button enabled (the config was read), no "Config not read" in the console.
-5. **Settings.** The gear beside STOP opens the one setting, the touch plate thickness: 0.5 for V1E's plate. Pass: close and reopen the page, it is still there (it lives in `highroller.json` on the board). Dot depth and the corner margin are asked by Calibrate and the flatness map themselves.
+5. **Settings.** The gear beside STOP opens the one setting, the touch plate thickness: 0.5 for V1E's plate. The sheet also names the controller's firmware (FluidNC v3.9.9), read from `$System/Stats`. Pass: close and reopen the page, it is still there (it lives in `highroller.json` on the board). Dot depth and the corner margin are asked by Calibrate and the flatness map themselves.
 
 ## Jogging, STOP, homing, probing
 
@@ -26,7 +26,7 @@ Router unplugged (spindle off) for everything up to the air-cut; a hand near the
 
 ## A job
 
-14. **Air-cut a small file** with the spindle unplugged. Pass: Run asks first; percentage and time left fall smoothly; Pause then Resume works; STOP mid-job holds then resets and keeps the position; progress reaches 100 % after the SD field disappears; file actions are disabled while it runs.
+14. **Air-cut a small file** with the spindle unplugged. When it ends, a "Job finished" notice names the file and the time it took (and the phone buzzes); a job ended by STOP gets no notice. Before running it, press **Check**: "Checking…" with a percentage, then "OK: N lines" (the state pill reads Check meanwhile and nothing moves). Then set a work zero near the far edge and Check again: the soft-limit message names the axis and the target, the machine goes to Alarm and the app unlocks it. Pass: Run asks first; percentage and time left fall smoothly; Pause then Resume works; STOP mid-job holds then resets and keeps the position; progress reaches 100 % after the SD field disappears; file actions are disabled while it runs.
 
 ## Calibration
 
@@ -74,3 +74,7 @@ $H
 **`Settings not read: highroller.json is corrupt (Unexpected end of JSON input)`.** The file was cut off mid-write. FluidNC handles one upload at a time, and an upload that starts while another is still going makes it drop the first one's file; builds before 2026-10-05 could do that to themselves (a settings write landing on a config write or an SD upload). `$LocalFS/Delete=highroller.json` and reload the page: it writes a fresh file. Later builds queue their uploads one after another, and rewrite an unreadable settings file on their own.
 
 **The flash.** It is 192 KB in total; `$LocalFS/List` ends with Free, Used and Total, and `$LocalFS/Delete=<name>` frees space. A write into a full flash leaves a cut-off file too, and a calibration pass refuses to write config.yaml when there is not room, with the numbers.
+
+## Folder upload (laptop)
+
+Open… → **Upload folder**, pick a folder of G-code: its folders appear under the current one and the files go up one by one with a count; `.DS_Store` and the like stay behind. Pick the same folder again: one question names the files already there, and Cancel leaves them.

@@ -5,12 +5,16 @@ import { parseGcode } from './gcode.js'
 import { currentSegment, along } from './track.js'
 import { cacheGet, cachePut } from './jobcache.js'
 import { confirm as ask } from './confirm.svelte.js'
+import { ALARMS } from './status.js'
 
 const sd = sdFiles()
 const baseName = file => file.replace(/^\/sd\//i, '').replace(/^\//, '')
 
 // The Job tab's state: SD files, the loaded G-code, and how far a running job has got.
-export const job = $state({ dir: '', files: [], error: '', busy: '', upload: null, name: '', data: null, current: -1, along: 0, startedAt: 0, failed: '', starting: false, running: false, pausedMs: 0 })
+// finished: { name, ms } once a job has run to its own end (not a stop, not an alarm); the UI shows it and clears it.
+// check: the open file's run through FluidNC's check mode: { running, percent, result: null | { ok, text } }.
+const NO_CHECK = () => ({ running: false, percent: 0, result: null })
+export const job = $state({ dir: '', files: [], error: '', busy: '', upload: null, name: '', data: null, lines: 0, current: -1, along: 0, startedAt: 0, failed: '', starting: false, running: false, pausedMs: 0, finished: null, check: NO_CHECK() })
 
 // The SD card is only changed while nothing runs: FluidNC accepts uploads mid-job, and one of the same name cuts the running file short.
 const idleNoJob = () => machine.status.state === 'Idle' && !machine.status.sd && !job.running
@@ -46,6 +50,8 @@ export async function load(path, size, text) {
     }
     job.data = parseGcode(text, Number.isFinite(machine.maxRate.X) ? machine.maxRate : undefined) // stock rates until the machine's are read
     job.name = path
+    job.lines = text.split('\n').filter(l => l.trim()).length
+    job.check = NO_CHECK() // another file (or the same one again): not checked yet
     job.current = -1
     job.failed = ''
     job.error = ''
@@ -113,13 +119,113 @@ export async function mkdir(dir, name) {
   }
 }
 
+// A folder from a desktop picker (files carry webkitRelativePath): its tree is recreated under `dir`, folders
+// first, then every file goes up in turn. Files already on the card are replaced only after one question.
+export async function uploadTree(files, dir = job.dir) {
+  if (!noJob()) {
+    job.error = WAIT
+    return
+  }
+  const bad = files.find(f => f.webkitRelativePath.split('/').some(badName))
+  if (bad) {
+    job.error = cannotRun(bad.webkitRelativePath)
+    return
+  }
+  const at = p => (dir ? `${dir}/${p}` : p)
+  const folderOf = f => f.webkitRelativePath.split('/').slice(0, -1).join('/')
+  const folders = [...new Set(files.map(folderOf))].sort((a, b) => a.split('/').length - b.split('/').length)
+  job.busy = 'Creating folders…'
+  job.upload = 0
+  try {
+    const existing = new Set()
+    for (const d of folders) {
+      const parent = d.includes('/') ? d.slice(0, d.lastIndexOf('/')) : ''
+      try {
+        await sd.mkdir(at(parent), d.split('/').pop())
+      } catch {} // there already: fine, as long as the listing below works
+      for (const f of await sd.list(at(d))) if (!f.dir) existing.add(`${d}/${f.name}`)
+    }
+    const clashes = files.filter(f => existing.has(f.webkitRelativePath))
+    if (clashes.length) {
+      job.busy = ''
+      const names = clashes.slice(0, 3).map(f => f.webkitRelativePath).join(', ') + (clashes.length > 3 ? ', …' : '')
+      if (!(await ask({ title: `Replace ${clashes.length} of ${files.length} files?`, text: `${names} are on the SD card already.`, ok: 'Replace', danger: true }))) return
+    }
+    let n = 0
+    for (const f of files) {
+      if (!noJob()) throw new Error(WAIT)
+      job.busy = `Uploading ${++n} of ${files.length}: ${f.webkitRelativePath}`
+      job.upload = 0
+      await sd.upload(f, at(folderOf(f)), p => (job.upload = p))
+    }
+    job.error = ''
+  } catch (e) {
+    job.error = e.message
+  } finally {
+    job.upload = null
+    job.busy = ''
+  }
+  await refresh(dir)
+}
+
+// The open file through FluidNC's check mode: every line parsed and checked against the soft limits with the
+// current work zero, nothing moved, the file read as fast as the card gives it. The first bad line ends the
+// run and is reported with its number; a move past the travel comes back as a soft limit.
+export async function checkFile() {
+  if (job.check.running || !job.data || !idleNoJob() || job.upload !== null) return
+  if (badName(job.name)) {
+    job.error = cannotRun(job.name)
+    return
+  }
+  job.check = { running: true, percent: 0, result: null }
+  job.error = ''
+  const logAt = machine.log.length
+  const sleep = ms => new Promise(r => setTimeout(r, ms))
+  const until = async (cond, ms) => {
+    const t0 = Date.now()
+    while (!cond()) {
+      if (Date.now() - t0 > ms) return false
+      await sleep(100)
+    }
+    return true
+  }
+  try {
+    let r = await send('$C')
+    if (!r.ok) throw new Error(`$C refused: ${r.error}`)
+    if (!(await until(() => machine.status.state === 'Check', 3000))) throw new Error('The controller did not enter check mode')
+    r = await send(`$SD/Run=/${job.name}`)
+    if (!r.ok) throw new Error(`Run refused: ${r.error}`)
+    await until(() => machine.status.sd || machine.status.state !== 'Check', 3000) // the run shows up as SD: (or is over already)
+    if (!(await until(() => !machine.status.sd, 20 * 60000))) throw new Error('The check did not finish in 20 minutes')
+    await sleep(300) // the last lines' messages
+    const seen = machine.log.slice(logAt)
+    const bad = seen.map(l => /^\[MSG:ERR: (\d+) \((.+?)\) in .* at line (\d+)\]$/.exec(l)).find(Boolean)
+    const soft = seen.map(l => /^\[MSG:INFO: (Soft limit exceeded on [XYZ] axis: .*)\]$/.exec(l)).find(Boolean)
+    const alarm = seen.map(l => /^ALARM:(\d+)/.exec(l)).find(Boolean)
+    job.check.result = bad ? { ok: false, text: `Line ${bad[3]}: error ${bad[1]}, ${bad[2].toLowerCase()}` }
+      : soft ? { ok: false, text: `${soft[1]} (with the current work zero)` }
+      : alarm ? { ok: false, text: ALARMS[alarm[1]] ?? `ALARM:${alarm[1]}` }
+      : { ok: true, text: `OK: ${job.lines} lines, nothing past the travel` }
+  } catch (e) {
+    job.check.result = { ok: false, text: e.message }
+  } finally {
+    // Out of check mode: $C while still in it (a reset); after a soft limit the state is Alarm, which $X clears
+    if (machine.status.state === 'Check') await send('$C')
+    else if (machine.status.state === 'Alarm') await send('$X')
+    await until(() => machine.status.state === 'Idle', 3000)
+    job.check.running = false
+  }
+}
+
 export const sdUrl = path => sd.url(path)
 
 // Close the open file: the panel goes back to "No file open". Not while its job runs (the follower needs the data).
 export function unload() {
-  if (job.running) return
+  if (job.running || job.check.running) return
   job.name = ''
   job.data = null
+  job.lines = 0
+  job.check = NO_CHECK()
   job.current = -1
   job.along = 0
   job.error = ''
@@ -150,11 +256,16 @@ export const resume = () => fnc.resume()
 // Follow a running SD job: load its file if it isn't the one shown (page reload, or started elsewhere),
 // then track the segment being cut. Only machine.status is a dependency; the rest is read untracked.
 let wasRunning = false
+let stopsAtStart = 0 // machine.stops when the job began: a STOP since means it did not finish on its own
 let heldSince = 0 // when the current hold began: time spent paused is left out of the job's elapsed time
 $effect.root(() => {
   $effect(() => {
     const s = machine.status
     untrack(() => {
+      if (s.state === 'Check') { // a check-mode run is not a job: only its progress is of interest
+        if (s.sd) job.check.percent = s.sd.percent
+        return
+      }
       if (s.state === 'Hold') {
         const now = Date.now()
         if (heldSince) job.pausedMs += now - heldSince
@@ -170,6 +281,8 @@ $effect.root(() => {
           job.along = along(job.data, job.current, s.wpos)
           return
         }
+        // Ran to its own end: the state is Idle, not Alarm, and nobody pressed STOP (a stop while held ends in Idle too)
+        if (job.running && s.state === 'Idle' && machine.stops === stopsAtStart) job.finished = { name: job.name, ms: job.startedAt ? Date.now() - job.startedAt - job.pausedMs : 0 }
         job.running = false
         job.startedAt = 0
         job.failed = '' // a load that failed mid-job may work next time
@@ -179,6 +292,7 @@ $effect.root(() => {
       job.running = true
       if (!wasRunning) {
         wasRunning = true
+        stopsAtStart = machine.stops
         job.current = -1 // a job just started, here or elsewhere: track it from its beginning
         job.along = 0
         job.pausedMs = 0
