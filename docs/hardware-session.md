@@ -10,8 +10,8 @@ Router unplugged (spindle off) for everything up to the air-cut; a hand near the
 
 ## Connection and reading the board
 
-4. **Connect.** Pass: "Connected", the Wi-Fi bars, work coordinates within about a second (no `–.---`), the Tools tab's Calibrate button enabled (the config was read), no "Config not read" in the console.
-5. **Settings.** The gear beside STOP opens the one setting, the touch plate thickness: 0.5 for V1E's plate. The sheet also names the controller's firmware (FluidNC v3.9.9), read from `$System/Stats`. Pass: close and reopen the page, it is still there (it lives in `highroller.json` on the board). Dot depth and the corner margin are asked by Calibrate and the flatness map themselves.
+4. **Connect.** Pass: "Connected", the Wi-Fi bars, the firmware's name and version in grey under them, work coordinates within about a second (no `–.---`), the Tools tab's Calibrate button enabled (the config was read), no "Config not read" in the console.
+5. **Settings.** The gear beside STOP opens the one setting, the touch plate thickness: 0.5 for V1E's plate. Pass: close and reopen the page, it is still there (it lives in `highroller.json` on the board). Dot depth and the corner margin are asked by Calibrate and the flatness map themselves.
 
 ## Jogging, STOP, homing, probing
 

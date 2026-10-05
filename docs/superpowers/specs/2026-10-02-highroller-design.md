@@ -99,8 +99,9 @@ Bytes of `0x80` and above are sent as one-character strings. The browser encodes
 
 **Always visible**
 - Connection badge, with the controller's Wi-Fi signal strength next to it (from `$System/Stats`, polled every 15 s; hidden in access-point mode).
+- Under those, in small grey text, the controller's firmware name and version from the same `$System/Stats` read (just the version number on a phone; added 2026-10-05).
 - Machine state.
-- Large STOP button, with a gear button beside it that opens the Settings sheet (the touch plate thickness, the only setting shown, and the controller's firmware name and version from its `$System/Stats`, which the state pill also shows on hover), and the dice logo at the left of the bar. On a phone the bar drops the word beside the connection dot and the Wi-Fi percentage (amended 2026-10-04).
+- Large STOP button, with a gear button beside it that opens the Settings sheet (the touch plate thickness, the only setting shown), and the dice logo at the left of the bar. On a phone the bar drops the word beside the connection dot and the Wi-Fi percentage (amended 2026-10-04).
 - An alarm banner when needed, with the reason in plain language and Home / Unlock buttons.
 
 **Layouts**

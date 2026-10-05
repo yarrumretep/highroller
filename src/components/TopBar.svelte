@@ -12,6 +12,7 @@
     : ''
   )
   let showSettings = $state(false)
+  const fwShort = $derived(/v[\d.]+/.exec(machine.fw ?? '')?.[0] ?? machine.fw) // "v4.1.1" for a phone's width
   // A blank, invalid or negative plate thickness keeps the previous value rather than becoming 0 (or negative).
   function plate(e) {
     const v = e.currentTarget.value
@@ -33,19 +34,25 @@
     <g transform="translate(24 40) rotate(-14)"><rect x="-13" y="-13" width="26" height="26" rx="5" fill="#2563eb" stroke="#0f172a" stroke-width="2" /><use href="#six" /></g>
     <g transform="translate(42 24) rotate(16)"><rect x="-13" y="-13" width="26" height="26" rx="5" fill="#2563eb" stroke="#0f172a" stroke-width="2" /><use href="#six" /></g>
   </svg>
-  <span class="conn" class:open={machine.conn === 'open'}>
-    <span class="word">{machine.conn === 'open' ? 'Connected' : machine.everOpen ? 'Reconnecting…' : 'Connecting…'}</span>
-  </span>
-  {#if machine.conn === 'open' && machine.wifi !== null}
-    <span class="wifi" class:weak={machine.wifi < 25} title="Wi-Fi signal at the controller">
-      <svg viewBox="0 0 19 12" width="19" height="12" aria-hidden="true">
-        {#each [1, 25, 50, 75] as level, i}
-          <rect x={i * 5} y={9 - i * 3} width="4" height={3 + i * 3} rx="1" class:on={machine.wifi >= level} />
-        {/each}
-      </svg>
-      <span class="mono pct">{machine.wifi}%</span>
-    </span>
-  {/if}
+  <div class="link">
+    <div class="row">
+      <span class="conn" class:open={machine.conn === 'open'}>
+        <span class="word">{machine.conn === 'open' ? 'Connected' : machine.everOpen ? 'Reconnecting…' : 'Connecting…'}</span>
+      </span>
+      {#if machine.conn === 'open' && machine.wifi !== null}
+        <span class="wifi" class:weak={machine.wifi < 25} title="Wi-Fi signal at the controller">
+          <svg viewBox="0 0 19 12" width="19" height="12" aria-hidden="true">
+            {#each [1, 25, 50, 75] as level, i}
+              <rect x={i * 5} y={9 - i * 3} width="4" height={3 + i * 3} rx="1" class:on={machine.wifi >= level} />
+            {/each}
+          </svg>
+          <span class="mono pct">{machine.wifi}%</span>
+        </span>
+      {/if}
+    </div>
+    <!-- The controller's firmware, from its stats: the full name on a desktop, just the version on a phone -->
+    {#if machine.conn === 'open' && machine.fw}<span class="fw" title="The controller's firmware">{machine.fw}</span><span class="fw short">{fwShort}</span>{/if}
+  </div>
   <span class="state {tone}">{machine.conn === 'open' ? state : '–'}</span>
   <button class="gear" aria-label="Settings" title="Settings" onclick={() => (showSettings = true)}>
     <svg viewBox="-12 -12 24 24" width="24" height="24" aria-hidden="true">
@@ -92,6 +99,10 @@
     border-bottom: 1px solid var(--line);
   }
   .logo { flex: none; }
+  .link { display: flex; flex-direction: column; gap: 2px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .fw { font-size: 11px; line-height: 1.2; color: var(--muted); opacity: 0.8; white-space: nowrap; }
+  .fw.short { display: none; }
   .conn { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
   .conn::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--warn); }
   .conn.open::before { background: var(--ok); }
@@ -120,7 +131,8 @@
   .stop:active { background: #991b1b; }
   /* A phone's width: the dot, the dice and the state say enough; the words and the percentage go */
   @media (max-width: 599px) {
-    .word, .pct { display: none; }
+    .word, .pct, .fw { display: none; }
+    .fw.short { display: inline; }
     .stop { padding: 0 18px; }
   }
   .banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; color: white; }
