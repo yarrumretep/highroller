@@ -195,9 +195,12 @@ export async function checkFile() {
     if (!(await until(() => machine.status.state === 'Check', 3000))) throw new Error('The controller did not enter check mode')
     r = await send(`$SD/Run=/${job.name}`)
     if (!r.ok) throw new Error(`Run refused: ${r.error}`)
-    await until(() => machine.status.sd || machine.status.state !== 'Check', 3000) // the run shows up as SD: (or is over already)
-    if (!(await until(() => !machine.status.sd, 20 * 60000))) throw new Error('The check did not finish in 20 minutes')
-    await sleep(300) // the last lines' messages
+    // The run is over when SD: goes, or when the controller says so first: Program End (M2/M30), the first bad
+    // line, or an alarm. Not SD: alone: in check mode it can outlast the file.
+    const ended = () => machine.log.slice(logAt).some(l => /^\[MSG:INFO: Program End\]|^\[MSG:ERR: .* at line \d+\]|^ALARM:/.test(l))
+    await until(() => machine.status.sd || machine.status.state !== 'Check' || ended(), 3000) // the run shows up as SD: (or is over already)
+    if (!(await until(() => !machine.status.sd || machine.status.state !== 'Check' || ended(), 20 * 60000))) throw new Error('The check did not finish in 20 minutes')
+    await sleep(500) // the last lines' messages
     const seen = machine.log.slice(logAt)
     const bad = seen.map(l => /^\[MSG:ERR: (\d+) \((.+?)\) in .* at line (\d+)\]$/.exec(l)).find(Boolean)
     const soft = seen.map(l => /^\[MSG:INFO: (Soft limit exceeded on [XYZ] axis: .*)\]$/.exec(l)).find(Boolean)
@@ -209,9 +212,17 @@ export async function checkFile() {
   } catch (e) {
     job.check.result = { ok: false, text: e.message }
   } finally {
-    // Out of check mode: $C while still in it (a reset); after a soft limit the state is Alarm, which $X clears
-    if (machine.status.state === 'Check') await send('$C')
-    else if (machine.status.state === 'Alarm') await send('$X')
+    // Out of check mode. $C while in it is a reset, and FluidNC drops the ok on the way out: send it without
+    // waiting for one (the reset banner settles it), and if the machine is still in Check after that, reset it
+    // ourselves. A soft limit leaves Alarm instead, which $X clears.
+    if (machine.status.state === 'Check') {
+      send('$C')
+      if (!(await until(() => machine.status.state !== 'Check', 2500))) {
+        fnc.reset()
+        await until(() => machine.status.state !== 'Check', 2500)
+      }
+    }
+    if (machine.status.state === 'Alarm') await send('$X')
     await until(() => machine.status.state === 'Idle', 3000)
     job.check.running = false
   }
