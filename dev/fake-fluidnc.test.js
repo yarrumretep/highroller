@@ -334,11 +334,11 @@ test('check mode: $C parses a file without moving, reports a bad line or a move 
     assert.equal((await fnc.send('$C')).ok, true)
     await sleep(80)
     assert.equal(fnc.status.state, 'Check')
-    const off = await fnc.send('$C') // no ok: the reset banner settles it
-    assert.equal(off.error, 'controller restarted')
+    assert.equal((await fnc.send('$C', { noReply: true })).ok, true) // answered with Disabled only: nothing to wait for
+    await sleep(120)
     assert.ok(lines.includes('[MSG:INFO: Disabled]'))
-    await sleep(80)
     assert.equal(fnc.status.state, 'Idle')
+    assert.equal((await fnc.send('$X')).ok, true) // the queue is free
   } finally {
     fnc.close()
     server.close()

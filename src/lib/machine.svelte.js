@@ -1,5 +1,5 @@
 import { FluidNC } from './fluidnc.js'
-import { EMPTY, wifiPercent } from './status.js'
+import { EMPTY, wifiPercent, fwVersion } from './status.js'
 import { createJogger } from './jog.js'
 import { stopMachine } from './stop.js'
 import { readFlash } from './flash.js'
@@ -19,6 +19,7 @@ export const machine = $state({
   stops: 0,
   stopping: false,
   wifi: null,
+  fw: null, // the firmware's name and version, from the first stats read on this connection
   config: null,
   homed: {}, // { X: true, … }: axes homed since this connection opened and since any alarm that loses the position
 })
@@ -95,7 +96,10 @@ async function readWifi() {
   wifiPending = true
   const r = await fnc.send('$System/Stats=json=yes', { quiet: true }) // the plain form has no signal line on 3.9.9
   wifiPending = false
-  if (r.ok) machine.wifi = wifiPercent(r.lines)
+  if (r.ok) {
+    machine.wifi = wifiPercent(r.lines)
+    machine.fw = fwVersion(r.lines) ?? machine.fw
+  }
 }
 
 let loadingConfig = false
@@ -139,10 +143,10 @@ export async function reloadConfig() {
 export const jogger = createJogger(fnc)
 
 // Commands the user asked for are echoed into the console, with their ok.
-export async function send(line) {
+export async function send(line, opts) {
   log('> ' + line)
-  const r = await fnc.send(line)
-  if (r.ok) log('ok')
+  const r = await fnc.send(line, opts)
+  if (r.ok && !opts?.noReply) log('ok')
   return r
 }
 

@@ -35,10 +35,12 @@ export class FluidNC {
   // Resolves with { ok, error, lines } when FluidNC answers ok or error:N. Never rejects.
   // Refuses at once when not connected, so motion is never queued for later.
   // quiet: the app's own queries; their output stays out of onLine (alarms, messages and the reset banner still go through).
-  send(line, { quiet = false } = {}) {
+  // noReply: sent in its turn and settled at once, nothing waited for. For the commands FluidNC answers with silence,
+  // such as the $C that leaves check mode (a reset that swallows its own ok); waiting would block the queue for good.
+  send(line, { quiet = false, noReply = false } = {}) {
     if (this.ws?.readyState !== OPEN) return Promise.resolve({ ok: false, error: 'disconnected', lines: [] })
     return new Promise(resolve => {
-      this.queue.push({ line, resolve, lines: [], quiet })
+      this.queue.push({ line, resolve, lines: [], quiet, noReply })
       this._pump()
     })
   }
@@ -155,9 +157,15 @@ export class FluidNC {
   }
 
   _pump() {
-    if (this.inflight || !this.queue.length || this.ws?.readyState !== OPEN) return
-    this.inflight = this.queue.shift()
-    this.ws.send(this.inflight.line + '\n')
+    while (!this.inflight && this.queue.length && this.ws?.readyState === OPEN) {
+      const c = this.queue.shift()
+      this.ws.send(c.line + '\n')
+      if (!c.noReply) {
+        this.inflight = c
+        return
+      }
+      c.resolve({ ok: true, error: null, lines: [] }) // sent; whatever comes back is not its answer
+    }
   }
 
   _failAll(error) {

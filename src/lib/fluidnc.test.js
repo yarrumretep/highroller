@@ -203,3 +203,19 @@ test('hold, resume and jogCancel send their real-time bytes', t => {
   fnc.jogCancel()
   assert.deepEqual(ws().sent.slice(1), ['!', '~', '\x85'])
 })
+
+test('a noReply command is sent in its turn, settled at once, and holds nothing up', async t => {
+  const { fnc, ws } = setup(t)
+  ws().open()
+  ws().rx('ok\n') // answers $RI=100
+  const a = fnc.send('$C')
+  const b = fnc.send('$C', { noReply: true }) // queued behind a: FluidNC answers the exit from check mode with silence
+  const c = fnc.send('$X')
+  assert.deepEqual(ws().sent.slice(1), ['$C\n'])
+  ws().rx('[MSG:INFO: Enabled]\nok\n')
+  assert.deepEqual(await a, { ok: true, error: null, lines: ['[MSG:INFO: Enabled]'] })
+  assert.deepEqual(await b, { ok: true, error: null, lines: [] }) // settled without any reply
+  assert.deepEqual(ws().sent.slice(1), ['$C\n', '$C\n', '$X\n']) // and $X went straight out behind it
+  ws().rx('[MSG:INFO: Disabled]\nok\n') // the ok answers $X; the stray Disabled lands in its output, as any unowned line does
+  assert.deepEqual(await c, { ok: true, error: null, lines: ['[MSG:INFO: Disabled]'] })
+})

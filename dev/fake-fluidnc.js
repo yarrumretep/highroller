@@ -262,8 +262,8 @@ export function start(port = 8081) {
       return ok()
     }
     if (l === '$C') { // check mode: the parser and the travel, no motion; leaving it is a reset
-      // Leaving is a reset: Disabled, then the banner, and no ok (FluidNC 3.9.9 drops it on the way out)
-      if (m.state === 'Check') { reply('[MSG:INFO: Disabled]'); m.state = 'Idle'; m.moves = []; job = null; broadcast("Grbl 3.9 [FluidNC fake, '$' for help]"); return status() }
+      // Leaving is a reset that 3.9.9 answers with Disabled and nothing else: no ok, no banner
+      if (m.state === 'Check') { reply('[MSG:INFO: Disabled]'); m.state = 'Idle'; m.moves = []; job = null; return status() }
       if (m.state !== 'Idle') return reply('error:8')
       m.state = 'Check'; checkPos = [...m.mpos]; status(); reply('[MSG:INFO: Enabled]'); return ok()
     }

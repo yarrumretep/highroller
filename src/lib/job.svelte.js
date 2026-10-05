@@ -212,11 +212,12 @@ export async function checkFile() {
   } catch (e) {
     job.check.result = { ok: false, text: e.message }
   } finally {
-    // Out of check mode. $C while in it is a reset, and FluidNC drops the ok on the way out: send it without
-    // waiting for one (the reset banner settles it), and if the machine is still in Check after that, reset it
-    // ourselves. A soft limit leaves Alarm instead, which $X clears.
+    // Out of check mode. $C while in it is a reset, and FluidNC 3.9.9 answers it with "Disabled" and nothing else,
+    // no ok and no banner: waiting would hold the command queue for good. So nothing is waited for; the state
+    // leaving Check says it worked, and a machine still in Check after that is reset by hand. A soft limit leaves
+    // Alarm instead, which $X clears.
     if (machine.status.state === 'Check') {
-      send('$C')
+      await send('$C', { noReply: true })
       if (!(await until(() => machine.status.state !== 'Check', 2500))) {
         fnc.reset()
         await until(() => machine.status.state !== 'Check', 2500)
