@@ -284,7 +284,7 @@ Settings are stored on the board in `highroller.json` (on the flash), so the pho
 - touch-plate thickness (default 0.5 mm, V1 Engineering's plate): the one setting with its own place, the gear in the top bar;
 - dot depth (default 0.4 mm) and corner margin inside the travel (default 50 mm): asked on the calibration's first page (the margin on the flatness map's too) and remembered;
 - which motor is on the X-max side, for Y and for Z (stored, not shown; the swap rule maintains it);
-- jog step size and speeds;
+- (not on the board: the jog step size and the two jog speeds are per-device preferences, kept in localStorage only, since they change with every tap and each flash write is wear and a chance to collide with another upload; amended 2026-10-05)
 - the last pass's tilt and skew, for the motor-side swap rule.
 
 Settings are read from the board once the config has been read (both need the machine idle), and again on every connection. The first read after the page loads lets a change made before the board answered win; after a reconnect the board's copy wins outright, so a change made while disconnected is lost. A read that fails for any reason but a missing file writes nothing. Changes are written back, debounced, but only while the machine is Idle or Alarm with no job running (FluidNC handles uploads on the task that feeds the planner); otherwise the write waits until it is idle. localStorage keeps a copy for the moments before the board has answered.

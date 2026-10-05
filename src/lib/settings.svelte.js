@@ -18,6 +18,10 @@ const DEFAULTS = {
   zMotor0AtXmax: false,
 }
 const DROPPED = ['tapeMm', 'spanMm'] // settings earlier builds saved; forgotten on read, so the file sheds them on its next write
+// Per-device preferences: kept in localStorage only, never written to the board. They change with every tap on the
+// jog pad, and each write to the flash is wear and a chance to collide with another upload.
+const LOCAL = ['step', 'feedXY', 'feedZ']
+const boardPart = o => Object.fromEntries(Object.entries(o).filter(([k]) => !LOCAL.includes(k) && !DROPPED.includes(k)))
 
 function local() {
   try {
@@ -29,7 +33,7 @@ function local() {
 
 const shed = o => { for (const k of DROPPED) delete o[k]; return o }
 export const settings = $state(shed({ ...DEFAULTS, ...local() }))
-const initialJson = JSON.stringify(settings) // settings as the page started; a change from this before the board first answers wins over its copy
+const initialJson = JSON.stringify(boardPart(settings)) // the board's part as the page started; a change from this before the board first answers wins over its copy
 let synced = false // the board's copy has been read (or found missing) since the page loaded
 let onBoard = false // the board's copy has been read on this connection; only then are changes written back
 let boardJson = null // JSON last read from or written to the board; a change that still matches it needs no write back
@@ -66,20 +70,20 @@ async function loadFromBoard() {
     // no file yet (first run): ours are written below
   }
   if (machine.conn !== 'open') return false // the link dropped meanwhile; the next connection reads it again
-  if (board && (synced || JSON.stringify(settings) === initialJson)) {
-    Object.assign(settings, shed(board))
-    boardJson = JSON.stringify(settings)
+  if (board && (synced || JSON.stringify(boardPart(settings)) === initialJson)) {
+    Object.assign(settings, boardPart(board)) // the device's own step and speeds stay as they are
+    boardJson = JSON.stringify(boardPart(settings))
   } else {
     boardJson = null // no file yet, or a setting changed before the board first answered: ours are written back
   }
   synced = onBoard = true
-  maybeSave(JSON.stringify(settings)) // a change during the read doesn't retrigger the effect on its own
+  maybeSave(JSON.stringify(boardPart(settings))) // a change during the read doesn't retrigger the effect on its own
   return true
 }
 
 const retry = () => { if (machine.config && !onBoard) loadSettings() }
 
-const saveSettings = () => writeFlash(FILE, JSON.stringify(settings, null, 2) + '\n')
+const saveSettings = () => writeFlash(FILE, JSON.stringify(boardPart(settings), null, 2) + '\n')
 
 // Debounces a write-back once json has moved on from the board's last known copy.
 function maybeSave(json) {
@@ -90,7 +94,7 @@ function maybeSave(json) {
 
 // Writes only while nothing runs (FluidNC handles uploads on the task that feeds the planner); otherwise once idle.
 function writeBack() {
-  const json = JSON.stringify(settings)
+  const json = JSON.stringify(boardPart(settings))
   if (!onBoard || json === boardJson) return // the link dropped (the board's copy is read again), or nothing to write
   const s = machine.status
   if (!(s.state === 'Idle' || s.state === 'Alarm') || s.sd) return runWhenIdle(writeBack)
@@ -106,8 +110,7 @@ $effect.root(() => {
   // Read the board's copy once the config has loaded (both need the machine idle); the config is read on every connection.
   $effect(() => { if (machine.config && !onBoard) loadSettings() })
   $effect(() => {
-    const json = JSON.stringify(settings)
-    try { localStorage.setItem(KEY, json) } catch {}
-    maybeSave(json)
+    try { localStorage.setItem(KEY, JSON.stringify(settings)) } catch {} // everything, this device's preferences included
+    maybeSave(JSON.stringify(boardPart(settings))) // the board's part only: a step or speed change writes nothing
   })
 })
