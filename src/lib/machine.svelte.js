@@ -130,7 +130,8 @@ export async function reloadConfig() {
     const name = r.lines.find(l => l.startsWith('$Config/Filename='))?.split('=')[1] || 'config.yaml'
     const text = await readFlash(name)
     configStale = false
-    return (machine.config = { name, text, range: rangesOf(text) })
+    // onOff: a relay or OnOff spindle section (top-level key): M3/M5 switch it, speed and its override mean nothing
+    return (machine.config = { name, text, range: rangesOf(text), onOff: /^(relay|onoff)\s*:/im.test(text) })
   } catch (e) {
     configFailedAt = Date.now()
     log(`Config not read: ${e.message}`)

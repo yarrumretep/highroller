@@ -64,7 +64,7 @@
       <button disabled={machine.stopping} onclick={pause}>Pause</button>
     {:else}
       <div class="runcheck">
-        <button class="go" disabled={!idle || !job.data || running || job.starting || job.upload !== null || job.check.running} onclick={async () => (await ask({ title: `Run ${job.name}?`, text: 'Check the bit, the work zero, and that the area is clear.', ok: 'Run' })) && run()}>Run</button>
+        <button class="go" disabled={!idle || !job.data || running || job.starting || job.upload !== null || job.check.running} onclick={async () => (await ask({ title: `Run ${job.name}?`, text: `Check the bit, the work zero, and that the area is clear.${machine.config?.onOff ? ' The file starts the router itself.' : ''}`, ok: 'Run' })) && run()}>Run</button>
         <!-- Check mode: every line through the controller's parser and soft limits with the work zero as it is now, nothing moved -->
         <button disabled={!idle || !job.data || running || job.starting || job.upload !== null || job.check.running} title="Run the file through the controller without moving: bad lines and moves past the travel are reported" onclick={checkFile}>Check</button>
       </div>

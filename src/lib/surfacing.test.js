@@ -52,6 +52,15 @@ test('M0 holds the job before any cutting move', () => {
   assert.ok(lines.slice(0, m0).every(l => !l.startsWith('G1')))
 })
 
+test('with a relay spindle the file switches the router itself: M3 before the first cut, M5 after the last, no M0', () => {
+  const lines = surfacingGcode({ xMin: 0, xMax: 10, yMin: 0, yMax: 10, depth: 0.5, depthPerPass: 0.5, safeZ: 7, spindle: 'relay' }).trim().split('\n')
+  assert.ok(!lines.includes('M0'))
+  const on = lines.indexOf('M3 S1000')
+  assert.ok(on >= 0 && lines.slice(0, on).every(l => !l.startsWith('G1')), 'M3 comes before any cutting move')
+  assert.deepEqual(lines.slice(-3), ['G0 Z7', 'M5', 'G0 X-12.7 Y0']) // raised clear, router off, back to the start
+  assert.ok(lines.slice(on + 1, -3).every(l => !/^M[35]/.test(l)), 'switched once each way')
+})
+
 test('the file ends raised clear of the work', () => {
   const text = surfacingGcode({ xMin: 0, xMax: 10, yMin: 0, yMax: 10, depth: 0.5, depthPerPass: 0.5, safeZ: 7 })
   const lines = text.trim().split('\n')

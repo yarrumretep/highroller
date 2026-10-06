@@ -5,7 +5,9 @@
 const num = v => String(Math.round(v * 1000) / 1000) // G-code numbers: at most 3 decimals, no trailing zeros
 
 // origin: the work X0 Y0 in machine coordinates, written into the file so it always cuts at its own corner.
-export function surfacingGcode({ xMin, xMax, yMin, yMax, diameter = 25.4, stepoverPct = 40, depth, depthPerPass = 0.5, feed = 2500, plungeFeed = 300, safeZ = 5, origin = null }) {
+// spindle: 'manual' holds the job (M0) before the first cut so the router can be switched on by hand; 'relay'
+// switches it with M3 (the controller's spinup_ms waits for it) and M5 at the end.
+export function surfacingGcode({ xMin, xMax, yMin, yMax, diameter = 25.4, stepoverPct = 40, depth, depthPerPass = 0.5, feed = 2500, plungeFeed = 300, safeZ = 5, origin = null, spindle = 'manual' }) {
   const radius = diameter / 2
   const x0 = xMin - radius, x1 = xMax + radius
   const step = diameter * stepoverPct / 100
@@ -22,13 +24,15 @@ export function surfacingGcode({ xMin, xMax, yMin, yMax, diameter = 25.4, stepov
 
   const lines = ['G21 G90 G94 G54'] // G54: the zero Create and the flatness map set
   if (origin) lines.push(`G10 L2 P1 X${num(origin.x)} Y${num(origin.y)}`) // Z0 stays whatever was set at the highest point
-  lines.push(`G0 Z${num(safeZ)}`, `G0 X${num(x0)} Y${num(yMin)}`, 'M0')
+  lines.push(`G0 Z${num(safeZ)}`, `G0 X${num(x0)} Y${num(yMin)}`, spindle === 'relay' ? 'M3 S1000' : 'M0')
   // Each pass covers the whole area again, deeper. Every row: lift, rapid to its left end, plunge, cut to the right.
   // (The first row's lift and rapid are zero-length: the tool already waits there.)
   for (const z of passes) {
     for (const y of rows) lines.push(`G0 Z${num(safeZ)}`, `G0 X${num(x0)} Y${num(y)}`, `G1 Z${num(z)} F${num(plungeFeed)}`, `G1 X${num(x1)} F${num(feed)}`)
   }
-  lines.push(`G0 Z${num(safeZ)}`, `G0 X${num(x0)} Y${num(yMin)}`)
+  lines.push(`G0 Z${num(safeZ)}`)
+  if (spindle === 'relay') lines.push('M5')
+  lines.push(`G0 X${num(x0)} Y${num(yMin)}`)
   return lines.join('\n') + '\n'
 }
 

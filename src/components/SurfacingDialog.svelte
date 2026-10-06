@@ -30,6 +30,7 @@
   const W = $derived(area ? r3(area.xMax - area.xMin) : 0)
   const H = $derived(area ? r3(area.yMax - area.yMin) : 0)
   const originLine = $derived(area ? `G10 L2 P1 X${area.xMin} Y${area.yMin}` : '') // work X0 Y0 at the cut's corner; Z0 is left alone
+  const relay = $derived(!!machine.config?.onOff) // a relay spindle: the file switches the router itself
   const blocked = $derived.by(() => {
     if (!machine.config?.range) return "Waiting for the machine's config (it is read while idle)"
     if (machine.conn !== 'open') return 'Not connected'
@@ -50,7 +51,7 @@
       const a = { xMin: 0, xMax: W, yMin: 0, yMax: H }
       const name = surfacingName({ ...a, depth: cut.depth })
       // The file carries its own origin line too, so it cuts at this corner even if it is reopened later
-      const file = new File([surfacingGcode({ ...a, ...cut, origin: { x: area.xMin, y: area.yMin } })], name, { type: 'text/plain' })
+      const file = new File([surfacingGcode({ ...a, ...cut, origin: { x: area.xMin, y: area.yMin }, spindle: relay ? 'relay' : 'manual' })], name, { type: 'text/plain' })
       if (machine.status.state !== 'Idle') return (failed = `Wait for Idle (now ${machine.status.state})`)
       // First the origin, so the Job preview shows the file where it will cut
       const r = await send(originLine)
@@ -76,7 +77,7 @@
     <label>{label} <input type="number" min="0" {step} bind:value={cut[key]} /> {unit}</label>
   {/each}
   {#if area}
-    <p>Area {W} × {H} mm, the whole table the cutter can reach. Create sets work X0 Y0 at its corner (Z0 is yours: Zero Z at the highest point, or Probe Z0), sends <span class="mono">{originLine}</span>, uploads the file and opens it. The file stops before the first cut so the router can be switched on; Resume starts it.</p>
+    <p>Area {W} × {H} mm, the whole table the cutter can reach. Create sets work X0 Y0 at its corner (Z0 is yours: Zero Z at the highest point, or Probe Z0), sends <span class="mono">{originLine}</span>, uploads the file and opens it. {relay ? 'The file switches the router on (M3) before the first cut and off (M5) at the end.' : 'The file stops before the first cut so the router can be switched on; Resume starts it.'}</p>
   {/if}
   <button class="go" disabled={!!blocked || making} onclick={create}>Create and open</button>
   {#if blocked}<p class="muted">{blocked}</p>{:else if unhomedNote(machine.homed, 'XY')}<p class="muted">{unhomedNote(machine.homed, 'XY')} The corner is in machine coordinates.</p>{/if}

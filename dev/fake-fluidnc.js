@@ -88,6 +88,11 @@ coolant:
 user_outputs:
   digital0_pin: gpio.26
   digital1_pin: gpio.27
+relay:
+  output_pin: gpio.27
+  enable_pin: NO_PIN
+  spinup_ms: 1000
+  spindown_ms: 1000
 `
 
 export function start(port = 8081) {

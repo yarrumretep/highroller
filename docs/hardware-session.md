@@ -44,7 +44,7 @@ Router unplugged (spindle off) for everything up to the air-cut; a hand near the
 ## Flatness map and surfacing (after calibration)
 
 20. **Flatness map.** Tools → Flatness map, 3 × 3 to start, margin 50 on the same page. At each point: tape is not needed, just the plate on the table under the bit, clip on, tap to arm, Probe; the bit lifts, pick the plate up, Continue. Pass: the result table shows heights of 0 or below with the highest cell marked, the tilt matches what the calibration left (near zero after a good pass), and the verdict says "Flat enough" or gives a depth. Press **Zero Z at the highest point**: the Z readout changes by the plate thickness plus the lift. After closing, the Operations box shows a link with the time and verdict; it opens the numbers again, with the zero button.
-21. **Surfacing pass.** Tools → Surfacing pass opens the panel: check the cutter diameter (25.4 for the 1" bit), leave stepover 40 % and depth per pass 0.5, and the depth from the map. **Create and open** sets work X0 Y0 at the cut's corner (the readout shows negative X and Y while the bit is at home), uploads the file and opens it. Pass: the preview fills the dashed outline. Run: the job holds at the first corner with the router off; switch the router on, press Resume, and watch the first row. STOP is hold then reset, as always. Expect about two hours for a full table at 2500 mm/min with a 1" bit.
+21. **Surfacing pass.** Tools → Surfacing pass opens the panel: check the cutter diameter (25.4 for the 1" bit), leave stepover 40 % and depth per pass 0.5, and the depth from the map. **Create and open** sets work X0 Y0 at the cut's corner (the readout shows negative X and Y while the bit is at home), uploads the file and opens it. Pass: the preview fills the dashed outline. Run: with a relay spindle the file starts the router itself (the Run question says so) and stops it at the end; without one the job holds at the first corner, you switch the router on and press Resume. Watch the first row either way. STOP is hold then reset, as always. Expect about two hours for a full table at 2500 mm/min with a 1" bit.
 
 ## Soft limits and a corrected steps-per-mm
 
@@ -78,3 +78,28 @@ $H
 ## Folder upload (laptop)
 
 Open… → **Upload folder**, pick a folder of G-code: its folders appear under the current one and the files go up one by one with a count; `.DS_Store` and the like stay behind. Pick the same folder again: one question names the files already there, and Cancel leaves them.
+
+## Router relay (2026-10-06)
+
+The router and the dust collector share one solid-state relay on the Jackpot3's gpio.27: the third plug down in the 5 V column of the "Outputs 24V or 5V" block, − to the SSR's input minus, + to its plus. The config makes it the spindle, so M3 starts both and M5 stops both; gpio.27 must leave `user_outputs` first, or the board goes into ConfigAlarm for a pin used twice:
+
+```yaml
+relay:
+  output_pin: gpio.27
+  enable_pin: NO_PIN
+  direction_pin: NO_PIN
+  disable_with_s0: false
+  s0_with_disable: true
+  spinup_ms: 3000
+  spindown_ms: 3000
+  tool_num: 0
+  off_on_alarm: true
+
+user_outputs:
+  digital0_pin: gpio.26
+  digital1_pin: NO_PIN
+  digital2_pin: gpio.0
+  digital3_pin: gpio.2
+```
+
+Checks: the Overrides panel shows **Router Off** in place of the spindle slider (the config was read). Press it: a question, Start, the relay clicks, the router and the dust collector run, the button reads On within a second (the report's A:S). Press again: M5, off. STOP while on: off (off_on_alarm). A surfacing file created now starts with `M3 S1000` and ends with `M5`; Run's question says the file starts the router itself.
