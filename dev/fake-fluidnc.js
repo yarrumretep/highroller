@@ -103,7 +103,7 @@ export function start(port = 8081) {
   let plateZ = -40 // machine Z of the touch plate's top
   let touchUntil = 0 // the probe input reads closed until then (the user tapping the plate to the bit)
   const waiters = [] // G4 replies waiting for motion to finish
-  let job = null // { lines, i, pos, size, name } while an SD file is being read
+  let job = null // { lines, i, pos, size, name, ack } while an SD file is being read; ack answers the $SD/Run when it is over (4.1.1)
   let pendingLines = [] // [text, ws]: lines from clients, which FluidNC only reads once the job's file has been read
   // Like FluidNC 4.x, any number of clients: replies go to the asker, state changes and alarms to everyone.
   const clients = new Set()
@@ -240,10 +240,9 @@ export function start(port = 8081) {
       if (m.state === 'Alarm') return reply('error:8') // FluidNC refuses a run only in alarm
       const buf = sd.get(run[1])
       if (!buf) return reply('error:62') // could not open the file
-      job = { lines: buf.toString().split('\n'), i: 0, pos: 0, size: buf.length, name: run[1] }
+      job = { lines: buf.toString().split('\n'), i: 0, pos: 0, size: buf.length, name: run[1], ack: ok }
       if (m.state === 'Idle') m.state = 'Run' // otherwise its moves just join those still queued
-      status()
-      return ok()
+      return status() // the ok comes when the job is over, as 4.1.1 answers (3.9.9 answered here)
     }
     const l = text.trim().toUpperCase()
     if (!l) return
@@ -371,9 +370,10 @@ export function start(port = 8081) {
     for (let n = 0; job && m.state === 'Check' && n < 40 && job.i < job.lines.length; n++) {
       const text = job.lines[job.i++]
       job.pos += Buffer.byteLength(text) + 1
-      if (checkLine(text, job.i, job.name)) { job = null; break }
+      if (checkLine(text, job.i, job.name)) { job.ack(); job = null; break }
     }
     if (job && job.i >= job.lines.length) {
+      job.ack() // the deferred answer to $SD/Run
       job = null // the whole file has been read: SD: goes now, while the last moves are still being cut
       if (!m.moves.length && m.state !== 'Check') m.state = 'Idle' // a file without moves
       status()

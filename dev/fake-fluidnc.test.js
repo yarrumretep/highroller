@@ -96,7 +96,7 @@ test('an uploaded file runs with $SD/Run and reports its progress', async () => 
     assert.equal((await fnc.send('$X')).ok, true)
     const seen = []
     fnc.onStatus = s => s.sd && seen.push(s.sd)
-    assert.equal((await fnc.send('$SD/Run=/job.nc')).ok, true)
+    assert.equal((await fnc.send('$SD/Run=/job.nc', { noReply: true })).ok, true) // answered only when the run is over
     await sleep(1500)
     assert.ok(seen.length > 0)
     assert.equal(seen[0].file, '/sd/job.nc')
@@ -238,7 +238,7 @@ test('line commands sent during a job wait until its file has been read', async 
     await opened
     assert.equal((await fnc.send('$X')).ok, true)
     assert.equal((await fnc.send('$RI=0')).ok, true) // no auto-reports: during the job, reports answer the client's ? polls
-    assert.equal((await fnc.send('$SD/Run=/steps.nc')).ok, true)
+    assert.equal((await fnc.send('$SD/Run=/steps.nc', { noReply: true })).ok, true) // answered only when the run is over
     const polled = []
     fnc.onStatus = s => polled.push(s)
     const t0 = Date.now()
@@ -286,7 +286,8 @@ test('SD: disappears once the file has been read, while the last moves still run
     assert.equal((await fnc.send('$X')).ok, true)
     const reports = []
     fnc.onStatus = s => reports.push(s)
-    assert.equal((await fnc.send('$SD/Run=/long-end.nc')).ok, true)
+    assert.equal((await fnc.send('$SD/Run=/long-end.nc', { noReply: true })).ok, true) // answered only when the run is over
+    for (let i = 0; i < 20 && fnc.status.state !== 'Run'; i++) await sleep(50) // the send settles before the job shows up
     for (let i = 0; i < 60 && fnc.status.state !== 'Idle'; i++) await sleep(50)
     const from = reports.findIndex(s => s.state === 'Run')
     const to = reports.findIndex((s, i) => i > from && s.state === 'Idle')
@@ -316,16 +317,16 @@ test('check mode: $C parses a file without moving, reports a bad line or a move 
     assert.equal((await fnc.send('$C')).ok, true)
     await sleep(80)
     assert.equal(fnc.status.state, 'Check')
-    assert.equal((await fnc.send('$SD/Run=/good.nc')).ok, true)
+    assert.equal((await fnc.send('$SD/Run=/good.nc', { noReply: true })).ok, true) // answered only when the run is over
     await sleep(400)
     assert.equal(fnc.status.state, 'Check')
     assert.ok(!fnc.status.sd, 'the file has been read')
     assert.deepEqual(fnc.status.mpos, [0, 0, 0]) // nothing moved
-    assert.equal((await fnc.send('$SD/Run=/bad.nc')).ok, true)
+    assert.equal((await fnc.send('$SD/Run=/bad.nc', { noReply: true })).ok, true) // answered only when the run is over
     await sleep(400)
     assert.ok(lines.includes('[MSG:ERR: 20 (Unsupported command) in /sd/bad.nc at line 3]'), lines.join('|'))
     assert.equal(fnc.status.state, 'Check')
-    assert.equal((await fnc.send('$SD/Run=/far.nc')).ok, true)
+    assert.equal((await fnc.send('$SD/Run=/far.nc', { noReply: true })).ok, true) // answered only when the run is over
     await sleep(400)
     assert.ok(lines.some(l => l.startsWith('[MSG:INFO: Soft limit exceeded on X axis: target 5000 mm')), lines.join('|'))
     assert.ok(lines.includes('ALARM:2'))

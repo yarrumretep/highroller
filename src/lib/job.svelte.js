@@ -193,7 +193,7 @@ export async function checkFile() {
     let r = await send('$C')
     if (!r.ok) throw new Error(`$C refused: ${r.error}`)
     if (!(await until(() => machine.status.state === 'Check', 3000))) throw new Error('The controller did not enter check mode')
-    r = await send(`$SD/Run=/${job.name}`)
+    r = await send(`$SD/Run=/${job.name}`, { noReply: true }) // 4.x answers it only when the run is over
     if (!r.ok) throw new Error(`Run refused: ${r.error}`)
     // The run is over when SD: goes, or when the controller says so first: Program End (M2/M30), the first bad
     // line, or an alarm. Not SD: alone: in check mode it can outlast the file.
@@ -257,8 +257,19 @@ export async function run() {
   job.starting = true
   job.current = -1
   job.along = 0
-  const r = await send(`$SD/Run=/${job.name}`)
-  if (!r.ok) job.error = `Run refused: ${r.error}`
+  // FluidNC 4.x answers $SD/Run only when the job is over (3.9.9 answered at once), so its ok is not waited for:
+  // the job showing up in the status says it started, and a refusal is an error line in the meantime.
+  const logAt = machine.log.length
+  const r = await send(`$SD/Run=/${job.name}`, { noReply: true })
+  if (!r.ok) job.error = `Run refused: ${r.error}` // not connected
+  else {
+    const t0 = Date.now()
+    const refusal = () => machine.log.slice(logAt).find(l => /^error:|^\[MSG:ERR:/.test(l))
+    while (Date.now() - t0 < 5000 && !machine.status.sd && !['Run', 'Hold'].includes(machine.status.state) && !refusal()) await new Promise(res => setTimeout(res, 100))
+    const bad = refusal()
+    if (bad) job.error = `Run refused: ${bad.replace(/^\[MSG:ERR:\s*|\]$/g, '')}`
+    else if (!machine.status.sd && !['Run', 'Hold'].includes(machine.status.state)) job.error = 'The job did not start (nothing from the controller in 5 s)'
+  }
   job.starting = false
 }
 

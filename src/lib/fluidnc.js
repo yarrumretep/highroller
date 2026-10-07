@@ -8,7 +8,9 @@ export class FluidNC {
   constructor({ host, WebSocket = globalThis.WebSocket, onStatus = () => {}, onLine = () => {}, onConnection = () => {} }) {
     // FluidNC 4.x serves the websocket on port 80, 3.x on port 81.
     // ponytail: an explicit port in host (dev server, fake) skips the 3.x fallback.
-    this.urls = host.includes(':') ? [`ws://${host}/`] : [`ws://${host}/`, `ws://${host}:81/`]
+    // independent_session: 4.x closes the older of two websockets that share a browser's session cookie (two tabs);
+    // asking for a session of our own keeps both open.
+    this.urls = host.includes(':') ? [`ws://${host}/?independent_session=1`] : [`ws://${host}/?independent_session=1`, `ws://${host}:81/`]
     this.WebSocket = WebSocket
     this.onStatus = onStatus
     this.onLine = onLine

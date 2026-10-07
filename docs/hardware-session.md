@@ -103,3 +103,7 @@ user_outputs:
 ```
 
 Checks: the Overrides panel shows **Router Off** in place of the spindle slider (the config was read). Press it: a question, Start, the relay clicks, the router and the dust collector run, the button reads On within a second (the report's A:S). Press again: M5, off. STOP while on: off (off_on_alarm). A surfacing file created now starts with `M3 S1000` and ends with `M5`; Run's question says the file starts the router itself.
+
+## Two tabs (4.1.1)
+
+Open the page in a second tab of the same browser and run a short job from the first: both tabs stay connected (the client asks the board for a session of its own; without that, 4.x closes the older socket) and the first tab shows no "Run refused: disconnected". The Run reply from a 4.x board comes only when the job is over, so the app watches the status for the job instead.

@@ -40,7 +40,7 @@ function setup(t, host = 'cnc.local') {
 
 test('connects to port 80 first and turns on auto-reporting', t => {
   const { ws, events } = setup(t)
-  assert.equal(ws().url, 'ws://cnc.local/')
+  assert.equal(ws().url, 'ws://cnc.local/?independent_session=1')
   assert.equal(ws().binaryType, 'arraybuffer')
   ws().open()
   assert.deepEqual(events.conn, ['connecting', 'open'])
@@ -66,7 +66,7 @@ test('a host with an explicit port only uses that address', t => {
   const { ws } = setup(t, 'localhost:8081')
   ws().drop()
   advance(t, 500)
-  assert.equal(ws().url, 'ws://localhost:8081/')
+  assert.equal(ws().url, 'ws://localhost:8081/?independent_session=1')
 })
 
 test('reassembles lines split across frames and routes status reports', t => {
@@ -121,7 +121,7 @@ test('a dropped link fails pending commands and reconnects to the same address',
   assert.equal((await p).error, 'disconnected')
   advance(t, 500)
   assert.equal(FakeWS.all.length, 2)
-  assert.equal(ws().url, 'ws://cnc.local/')
+  assert.equal(ws().url, 'ws://cnc.local/?independent_session=1')
 })
 
 test('polls with ? when quiet and drops a link that stays silent', t => {
